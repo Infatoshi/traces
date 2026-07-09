@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traces"
+version = "0.1.0"
+description = "Extract, redact, and export AI coding-agent traces for DistillKit."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["click>=8.1"]
+
+[project.optional-dependencies]
+privacy-filter = ["transformers>=4.40", "torch>=2.1"]
+gitleaks = []  # gitleaks is an external binary; no python deps
+publish = ["huggingface_hub>=0.20"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+
+[project.scripts]
+traces = "traces.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["traces*"]
