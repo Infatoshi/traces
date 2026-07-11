@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -86,3 +87,38 @@ def test_run_command_writes_manifest(tmp_path, monkeypatch):
     assert "export/messages.jsonl" in manifest["files"]
     assert "export/sharegpt.jsonl" in manifest["files"]
     assert manifest["config"]["variant"] == "both"
+
+
+def test_publish_refuses_export_with_leftovers(tmp_path):
+    export_dir = tmp_path / "export"
+    write_jsonl(export_dir / "messages.jsonl", [{
+        "messages": [{"role": "user", "content": "email alex@example.com"}],
+    }])
+
+    result = CliRunner().invoke(cli, [
+        "publish", "--repo", "user/test", "--in", str(export_dir),
+    ])
+
+    assert result.exit_code == 1
+    assert "Refusing publish" in result.output
+
+
+def test_publish_scans_clean_export_before_upload(tmp_path):
+    export_dir = tmp_path / "export"
+    write_jsonl(export_dir / "messages.jsonl", [{
+        "messages": [{"role": "user", "content": "hello"}],
+    }])
+
+    with patch(
+        "traces.publish.huggingface.upload_variant",
+        return_value="https://huggingface.co/datasets/user/test",
+    ) as upload:
+        result = CliRunner().invoke(cli, [
+            "publish", "--repo", "user/test", "--in", str(export_dir),
+            "--variant", "messages", "--private",
+        ])
+
+    assert result.exit_code == 0, result.output
+    upload.assert_called_once_with(
+        export_dir, "user/test", variant="messages", private=True
+    )

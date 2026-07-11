@@ -43,7 +43,12 @@ def test_extract_basic_user_assistant(tmp_path):
             "info": {"id": "sess-1", "cwd": "/tmp/proj"},
             "generated_title": "Hello",
             "current_model_id": "grok-4.5",
-            "session_kind": None,
+            "created_at": "2026-07-10T01:02:03Z",
+            "updated_at": "2026-07-11T04:05:06Z",
+            "chat_format_version": 1,
+            "reasoning_effort": "high",
+            "session_kind": "subagent",
+            "sandbox_profile": "off",
         },
     )
 
@@ -54,6 +59,13 @@ def test_extract_basic_user_assistant(tmp_path):
     assert conv["session_id"] == "sess-1"
     assert conv["project_path"] == "/tmp/proj"
     assert conv["name"] == "Hello"
+    assert conv["model"] == "grok-4.5"
+    assert conv["created_at"] == "2026-07-10T01:02:03Z"
+    assert conv["updated_at"] == "2026-07-11T04:05:06Z"
+    assert conv["version"] == 1
+    assert conv["reasoning_effort"] == "high"
+    assert conv["session_kind"] == "subagent"
+    assert conv["sandbox_profile"] == "off"
     roles = [m["role"] for m in conv["messages"]]
     assert roles == ["system", "user", "assistant"]
     assert conv["messages"][1]["content"] == "hello"

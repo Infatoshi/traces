@@ -88,6 +88,45 @@ def test_extract_cli_tool_call_and_result_attached(tmp_path):
                                      "output": "file.txt"}]
 
 
+def test_missing_session_metadata_uses_structured_cwd_not_message_regex(tmp_path):
+    install = tmp_path / "opencode"
+    session_id = "ses_structured"
+    msg_id = "msg_1"
+    write_json(install / "storage" / "message" / session_id / f"{msg_id}.json", {
+        "id": msg_id,
+        "sessionID": session_id,
+        "role": "assistant",
+        "time": {"created": 1000, "completed": 2000},
+        "path": {"cwd": "/structured/project", "root": "/structured/project"},
+        "modelID": "model-a",
+        "tokens": {
+            "input": 10,
+            "output": 5,
+            "reasoning": 2,
+            "cache": {"read": 3, "write": 1},
+        },
+    })
+    write_json(install / "storage" / "part" / msg_id / "prt_1.json", {
+        "id": "prt_1",
+        "sessionID": session_id,
+        "messageID": msg_id,
+        "type": "text",
+        "text": "Ignore this prose: cd /wrong/project and project-id=fake.",
+    })
+
+    conv = list(OpenCodeExtractor().extract(install))[0]
+
+    assert conv["project_path"] == "/structured/project"
+    assert conv.get("project_id") is None
+    assert conv["token_usage"] == {
+        "input": 10,
+        "output": 5,
+        "reasoning": 2,
+        "cached_input": 3,
+        "cache_write": 1,
+    }
+
+
 def test_extract_cli_empty_install(tmp_path):
     install = tmp_path / "opencode"
     (install / "storage" / "message").mkdir(parents=True)

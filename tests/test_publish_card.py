@@ -6,7 +6,13 @@ from traces.publish.dataset_card import render_card
 def test_card_has_yaml_frontmatter():
     manifest = {
         "sources": {"claude_code": {"raw_records": 7}},
-        "export_summary": {"messages_rows": 10, "sharegpt_pairs": 22},
+        "metadata_schema_version": "1.0",
+        "export_summary": {
+            "messages_rows": 10,
+            "sharegpt_pairs": 22,
+            "messages_by_source": {"claude_code": 10},
+            "sharegpt_pairs_by_source": {"claude_code": 22},
+        },
         "config": {"gitleaks": True},
     }
     card = render_card(manifest, repo_id="user/my-traces")
@@ -19,6 +25,7 @@ def test_card_has_yaml_frontmatter():
     # Totals come from export_summary, not summed per-source fields.
     assert "10 conversations" in card
     assert "22 instruction pairs" in card
+    assert "metadata schema\n`1.0`" in card
 
 
 def test_card_uses_export_summary_not_per_source_export_fields():
@@ -43,15 +50,28 @@ def test_card_uses_export_summary_not_per_source_export_fields():
     # and NOT the old per-source export fields.
     assert "9 conversations" in card
     assert "8 instruction pairs" in card
-    # The dropped per-source export columns are gone: header has one count col.
+    # The export columns are populated from the global summary's attribution.
     assert "Raw records" in card
-    assert "ShareGPT pairs |" not in card  # old per-source column header
-    assert "Conversations |" not in card   # old per-source column header
+    assert "ShareGPT pairs |" in card
+    assert "Conversations |" in card
 
 
-def test_card_repo_url_is_resmp_dev():
+def test_card_repo_url_is_infatoshi():
     manifest = {"sources": {}, "export_summary": {}, "config": {}}
     card = render_card(manifest, repo_id="user/x")
     assert "https://github.com/Infatoshi/traces" in card
     assert "your-org" not in card
     assert "kearm/agent-trace-share" not in card
+
+
+def test_card_does_not_hide_export_source_variants() -> None:
+    manifest = {
+        "sources": {"gemini": {"raw_records": 3}},
+        "export_summary": {
+            "messages_rows": 2,
+            "messages_by_source": {"gemini-cli": 2},
+        },
+    }
+    card = render_card(manifest, repo_id="user/x")
+    assert "| gemini | 3 | 0 | 0 |" in card
+    assert "| gemini-cli | 0 | 2 | 0 |" in card

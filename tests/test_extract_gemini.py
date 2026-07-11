@@ -63,6 +63,93 @@ def test_extract_attaches_thoughts_and_tokens(tmp_path):
     assert asst["tokens"] == {"input": 10, "output": 5}
 
 
+def test_extracts_current_gemini_tool_shape_observed_in_local_sessions(tmp_path):
+    install = tmp_path / ".gemini"
+    session = install / "tmp" / "hash" / "chats" / "session-current.json"
+    write_session(session, {
+        "sessionId": "current",
+        "projectHash": "hash",
+        "startTime": "2026-07-10T10:00:00Z",
+        "lastUpdated": "2026-07-10T10:00:02Z",
+        "messages": [
+            {"id": "u1", "type": "user", "content": "run", "timestamp": "t1"},
+            {
+                "id": "a1",
+                "type": "gemini",
+                "content": "done",
+                "timestamp": "t2",
+                "model": "gemini-model",
+                "tokens": {
+                    "input": 10, "output": 5, "cached": 3,
+                    "thoughts": 2, "tool": 1, "total": 21,
+                },
+                "toolCalls": [{
+                    "id": "call-1",
+                    "name": "run_shell_command",
+                    "args": {"command": "true"},
+                    "status": "success",
+                    "result": [{"functionResponse": {"id": "call-1"}}],
+                }],
+            },
+        ],
+    })
+
+    conv = list(GeminiExtractor().extract(install))[0]
+
+    assert conv["created_at"] == "2026-07-10T10:00:00Z"
+    assert conv["updated_at"] == "2026-07-10T10:00:02Z"
+    assert conv["token_usage"] == {
+        "input": 10,
+        "output": 5,
+        "cached_input": 3,
+        "reasoning": 2,
+        "tool": 1,
+        "total": 21,
+    }
+    assistant = conv["messages"][1]
+    assert assistant["id"] == "a1"
+    assert assistant["tool_calls"][0]["name"] == "run_shell_command"
+    assert assistant["tool_results"] == [{
+        "tool_call_id": "call-1",
+        "tool": "run_shell_command",
+        "status": "success",
+    }]
+
+
+def test_progressive_snapshots_keep_most_complete_structured_session(tmp_path):
+    install = tmp_path / ".gemini"
+    base = {
+        "sessionId": "same-session",
+        "projectHash": "same-project",
+        "startTime": "2026-01-01T00:00:00Z",
+    }
+    write_session(
+        install / "tmp" / "cache-a" / "chats" / "session-early.json",
+        {
+            **base,
+            "lastUpdated": "2026-01-01T00:01:00Z",
+            "messages": [{"type": "user", "content": "early"}],
+        },
+    )
+    write_session(
+        install / "tmp" / "cache-b" / "chats" / "session-complete.json",
+        {
+            **base,
+            "lastUpdated": "2026-01-01T00:02:00Z",
+            "messages": [
+                {"type": "user", "content": "early"},
+                {"type": "gemini", "content": "complete"},
+            ],
+        },
+    )
+
+    conversations = list(GeminiExtractor().extract(install))
+
+    assert len(conversations) == 1
+    assert len(conversations[0]["messages"]) == 2
+    assert conversations[0]["updated_at"] == "2026-01-01T00:02:00Z"
+
+
 def test_extract_empty_install(tmp_path):
     install = tmp_path / ".gemini"
     install.mkdir(parents=True)

@@ -28,6 +28,9 @@ def test_two_turn_conversation_yields_two_pairs(tmp_path):
         {"from": "gpt", "value": "a2"},
     ]
     assert summary["pairs"] == 2
+    assert rows[0]["metadata"]["trace_id"] == rows[1]["metadata"]["trace_id"]
+    assert rows[0]["metadata"]["pair"] == {"index": 0, "count": 2}
+    assert rows[1]["metadata"]["pair"] == {"index": 1, "count": 2}
 
 
 def test_trailing_user_without_assistant_dropped(tmp_path):

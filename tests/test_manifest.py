@@ -57,6 +57,7 @@ def test_write_manifest_roundtrip(tmp_path):
 
     # Top-level provenance fields.
     assert manifest["tool_version"] == __version__
+    assert manifest["metadata_schema_version"] == "1.0"
     assert "created_at" in manifest and manifest["created_at"]
     assert manifest["config"] == config_snapshot
 

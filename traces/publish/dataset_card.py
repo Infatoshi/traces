@@ -6,14 +6,17 @@ import json
 
 def render_card(manifest: dict, repo_id: str, license_name: str = "mit") -> str:
     sources = manifest.get("sources", {})
-    # Per-source block shows only raw record counts: the export pipeline does
-    # not thread source tags through to exported rows, so per-source export
-    # attribution is not available. Totals come from the global export_summary.
-    src_lines = "\n".join(
-        f"| {name} | {s.get('raw_records', 0)} |"
-        for name, s in sorted(sources.items())
-    )
     export_summary = manifest.get("export_summary", {})
+    messages_by_source = export_summary.get("messages_by_source", {})
+    pairs_by_source = export_summary.get("sharegpt_pairs_by_source", {})
+    source_names = sorted(
+        set(sources) | set(messages_by_source) | set(pairs_by_source)
+    )
+    src_lines = "\n".join(
+        f"| {name} | {sources.get(name, {}).get('raw_records', 0)} | "
+        f"{messages_by_source.get(name, 0)} | {pairs_by_source.get(name, 0)} |"
+        for name in source_names
+    )
     total_msgs = export_summary.get("messages_rows", 0)
     total_pairs = export_summary.get("sharegpt_pairs", 0)
     return f"""---
@@ -40,21 +43,20 @@ DistillKit-ready coding-agent traces in two variants:
 - `messages.jsonl`: multi-turn chat (`messages` column, OpenAI chat format)
 - `sharegpt.jsonl`: instruction pairs (`conversations` column, ShareGPT format)
 
+Both variants include privacy-safe metadata schema
+`{manifest.get('metadata_schema_version', 'unknown')}`.
+
 ## Source breakdown
 
-Per-source export attribution is not available (exported rows drop the source
-tag); the table below lists raw extracted record counts. See the totals for
-exported conversation/pair counts.
-
-| Source | Raw records |
-|---|---|
+| Source | Raw records | Conversations | ShareGPT pairs |
+|---|---:|---:|---:|
 {src_lines}
 
 **Totals:** {total_msgs} conversations / {total_pairs} instruction pairs.
 
 ## Redaction
 
-All traces were processed through traces's redaction pipeline:
+All traces were processed through the `traces` redaction pipeline:
 {json.dumps(manifest.get('config', {}), indent=2)}
 
 Inspect a sample before using. See the project README for the full methodology.

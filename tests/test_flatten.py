@@ -71,3 +71,16 @@ def test_model_and_timestamp_not_in_content():
     out = flatten_message(msg)
     assert "claude-x" not in out
     assert "timestamp" not in out.lower() or "timestamp" not in out
+
+
+def test_message_metadata_is_not_rendered_as_training_content():
+    out = flatten_message({
+        "role": "assistant",
+        "content": "done",
+        "id": "provider-message-id",
+        "parent_id": "provider-parent-id",
+        "usage": {"input_tokens": 10},
+        "tokens": {"output": 5},
+        "stop_reason": "end_turn",
+    })
+    assert out == "done"

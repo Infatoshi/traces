@@ -188,12 +188,18 @@ def extract_grok_session(session_dir: Path) -> Conversation | None:
         "project_name": Path(cwd).name if cwd else None,
         "name": summary.get("generated_title") or summary.get("session_summary"),
     }
-    if summary.get("created_at"):
-        # created_at is ISO; Conversation.created_at is optional int — skip type lie
-        pass
-    if summary.get("current_model_id"):
-        # stash dominant model on first assistant lacking model if needed — already on msgs
-        pass
+    for source_key, target_key in (
+        ("created_at", "created_at"),
+        ("updated_at", "updated_at"),
+        ("chat_format_version", "version"),
+        ("current_model_id", "model"),
+        ("reasoning_effort", "reasoning_effort"),
+        ("session_kind", "session_kind"),
+        ("sandbox_profile", "sandbox_profile"),
+    ):
+        value = summary.get(source_key)
+        if isinstance(value, (str, int, float, bool)) and value != "":
+            conv[target_key] = value
     return conv
 
 

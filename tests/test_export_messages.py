@@ -21,7 +21,10 @@ def test_export_one_conversation(tmp_path):
     assert len(rows) == 1
     assert rows[0]["messages"][0] == {"role": "user", "content": "hi"}
     assert rows[0]["messages"][1] == {"role": "assistant", "content": "hello"}
+    assert rows[0]["metadata"]["source"] == "claude_code"
+    assert rows[0]["metadata"]["counts"]["messages"] == 2
     assert summary["rows"] == 1
+    assert summary["by_source"] == {"claude_code": 1}
 
 
 def test_drops_conversation_with_no_assistant(tmp_path):

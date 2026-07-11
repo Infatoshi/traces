@@ -117,61 +117,6 @@ def read_tauri_store(dat_file):
         return {}
 
 
-def extract_directory_from_content(text):
-    """
-    Try to extract a directory path from text content (e.g., tool commands).
-    Looks for common patterns like 'cd /path/to/dir' or paths in commands.
-    """
-    if not text:
-        return None
-
-    import re
-
-    # Pattern 1: cd command followed by path
-    cd_pattern = r'cd\s+(["\']?)([^\s\'"]+)\1'
-    matches = re.findall(cd_pattern, text)
-    for match in matches:
-        path = match[1] if isinstance(match, tuple) else match
-        if path and (path.startswith('/') or path.startswith('~') or path[1:].startswith(':')):
-            return path
-
-    # Pattern 2: Common working directory indicators
-    cwd_pattern = r'(?:working\s+)?directory[:\s]+(["\']?)([^\s\'"]+)\1'
-    matches = re.findall(cwd_pattern, text)
-    for match in matches:
-        path = match[1] if isinstance(match, tuple) else match
-        if path and (path.startswith('/') or path.startswith('~') or path[1:].startswith(':')):
-            return path
-
-    # Pattern 3: Extract absolute paths (Unix-style)
-    abs_path_pattern = r'(?:^|\s|/)(/[^/\s\'"]{2,})'
-    matches = re.findall(abs_path_pattern, text)
-    for path in matches:
-        if path and len(path) > 3 and not path.endswith('.') and not path.endswith('..'):
-            return path
-
-    return None
-
-
-def extract_project_id_from_content(text):
-    """
-    Try to extract a project ID from text content.
-    Often appears in tool commands or git operations.
-    """
-    if not text:
-        return None
-
-    import re
-
-    # Pattern: project IDs in commands
-    project_pattern = r'(?:project[-_]?id|project)[=:\s]+([a-zA-Z0-9_-]+)'
-    match = re.search(project_pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1)
-
-    return None
-
-
 def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
     """
     Extract conversations from CLI JSON storage.
@@ -216,9 +161,16 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                 continue
 
             messages = []
-            all_content = []  # For reconstructing metadata
             first_message_time = None
             last_message_time = None
+            project_path = None
+            token_usage = {
+                'input': 0,
+                'output': 0,
+                'reasoning': 0,
+                'cached_input': 0,
+                'cache_write': 0,
+            }
 
             for msg_file in message_files:
                 try:
@@ -228,6 +180,9 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                     message_id = msg_data.get('id')
                     role = msg_data.get('role', 'assistant')
                     msg_time = msg_data.get('time', {}).get('created')
+                    structured_path = msg_data.get('path')
+                    if isinstance(structured_path, dict) and structured_path.get('cwd'):
+                        project_path = structured_path['cwd']
 
                     # Track timestamps
                     if msg_time:
@@ -256,6 +211,22 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                     # Add token usage
                     if 'tokens' in msg_data:
                         message['tokens'] = msg_data['tokens']
+                        tokens = msg_data['tokens']
+                        if isinstance(tokens, dict):
+                            for source_key, target_key in (
+                                ('input', 'input'),
+                                ('output', 'output'),
+                                ('reasoning', 'reasoning'),
+                            ):
+                                value = tokens.get(source_key)
+                                if isinstance(value, (int, float)):
+                                    token_usage[target_key] += value
+                            cache = tokens.get('cache')
+                            if isinstance(cache, dict):
+                                if isinstance(cache.get('read'), (int, float)):
+                                    token_usage['cached_input'] += cache['read']
+                                if isinstance(cache.get('write'), (int, float)):
+                                    token_usage['cache_write'] += cache['write']
                     if 'cost' in msg_data:
                         message['cost'] = msg_data['cost']
 
@@ -276,10 +247,6 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
 
                                 part_type = part_data.get('type')
                                 part_text = part_data.get('text', '')
-
-                                # Collect content for metadata reconstruction
-                                if part_text:
-                                    all_content.append(part_text)
 
                                 if part_type == 'text':
                                     content_parts.append(part_text)
@@ -341,14 +308,16 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
             if not messages:
                 continue
 
-            # Build conversation - use session data if available, otherwise reconstruct
-            combined_content = '\n'.join(all_content)
-
             conversation: Conversation = {
                 'messages': messages,
                 'source': 'opencode-cli',
                 'session_id': session_id,
+                'created_at': first_message_time,
+                'updated_at': last_message_time,
             }
+            nonzero_usage = {key: value for key, value in token_usage.items() if value}
+            if nonzero_usage:
+                conversation['token_usage'] = nonzero_usage
 
             if session_data:
                 # Use metadata from session file
@@ -357,6 +326,7 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                 conversation['updated_at'] = session_data.get('time', {}).get('updated')
                 conversation['project_id'] = session_data.get('projectID')
                 conversation['directory'] = session_data.get('directory')
+                conversation['project_path'] = session_data.get('directory') or project_path
                 conversation['version'] = session_data.get('version')
 
                 # Add summary stats if available
@@ -367,28 +337,10 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                 if 'parentID' in session_data:
                     conversation['parent_session_id'] = session_data['parentID']
             else:
-                # RECONSTRUCT metadata from messages/parts
-                conversation['created_at'] = first_message_time
-                conversation['updated_at'] = last_message_time
-
-                # Try to extract directory from content
-                conversation['directory'] = extract_directory_from_content(combined_content)
-
-                # Try to extract project ID from content
-                conversation['project_id'] = extract_project_id_from_content(combined_content)
-
-                # Generate a title from first user message
-                for msg in messages:
-                    if msg.get('role') == 'user' and msg.get('content'):
-                        # Take first 100 chars of first user message as title
-                        title = msg['content'][:100].strip()
-                        if len(msg['content']) > 100:
-                            title += '...'
-                        conversation['title'] = title
-                        break
-
-                # Set default version
-                conversation['version'] = 'unknown'
+                # Current OpenCode message records carry a structured path.cwd.
+                # If it is absent, leave project metadata unknown rather than
+                # interpreting commands or prose as metadata.
+                conversation['project_path'] = project_path
 
             conversations.append(conversation)
 

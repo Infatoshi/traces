@@ -18,6 +18,7 @@ import concurrent.futures
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -64,11 +65,16 @@ def api_base(base_url: str) -> str:
 def http_json(
     url: str, payload: dict[str, Any] | None = None, timeout: int = 60
 ) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("LLM residue endpoint must be an HTTP(S) URL")
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"content-type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    # The scheme and host are validated above. The endpoint is intentionally
+    # user-configurable so this can target a local OpenAI-compatible server.
+    with urllib.request.urlopen(req, timeout=timeout) as response:  # nosec B310
         return json.loads(response.read().decode("utf-8"))
 
 

@@ -9,6 +9,8 @@ from typing import Any
 KNOWN_FIELDS: list[tuple[str, str]] = [
     ("tool_use", "tool_use"),
     ("tool_uses", "tool_use"),
+    ("tool_call", "tool_use"),
+    ("tool_calls", "tool_use"),
     ("tool_results", "tool_result"),
     ("tool_result", "tool_result"),
     ("code_context", "code_context"),
@@ -17,7 +19,25 @@ KNOWN_FIELDS: list[tuple[str, str]] = [
 ]
 
 # Fields that are message-level metadata, NOT training signal, kept out of content.
-META_FIELDS = {"role", "content", "model", "timestamp", "session_id", "name"}
+META_FIELDS = {
+    "role",
+    "content",
+    "model",
+    "timestamp",
+    "session_id",
+    "name",
+    "id",
+    "parent_id",
+    "status",
+    "stop_reason",
+    "usage",
+    "tokens",
+    "cost",
+    "phase",
+    "provider",
+    "agent",
+    "mode",
+}
 
 
 def _render_tool_use(item: dict[str, Any]) -> str:

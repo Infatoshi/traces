@@ -29,7 +29,31 @@ uv run traces sample --in /tmp/traces-out/export -n 5 --out /tmp/traces-preview
 
 Output layout: `raw_extracted/`, `redacted/`, `export/{messages,sharegpt}.jsonl`, `MANIFEST.json`.
 
-Stage commands if needed: `traces extract|redact|export|verify|stats|sample|publish`.
+Stage commands if needed: `traces extract|redact|clean|export|verify|stats|sample|publish`.
+
+Filtered export example:
+
+```bash
+TRACES_METADATA_KEY='<stable local key>' \
+uv run traces export --in /tmp/traces-out/redacted --out /tmp/traces-out/filtered \
+  --include-source 'grok_build' --model '*grok*' \
+  --reasoning-effort high --session-kind subagent \
+  --since 2026-07-01T00:00:00Z --require-tools --dedup
+```
+
+Available export filters: `--include-source`, `--drop-sources`, `--project`,
+`--model`, `--status`, `--reasoning-effort`, `--session-kind`, `--since`,
+`--until`, `--min-turns`, `--max-turns`,
+`--min-assistant-chars`, `--require-tools`, `--require-diffs`, and `--dedup`.
+Shell globs are accepted for source, project, and model. Export summaries report
+the first drop reason for each excluded conversation.
+
+Every exported row has metadata schema `1.0`: an opaque trace ID, exact source,
+day-bucketed session fields, an opaque project ID, model names, message/tool/
+diff counts, and normalized token totals when the adapter provides them. Raw
+session IDs, paths, titles, message IDs, tool payloads, and source files are not
+published. Set `TRACES_METADATA_KEY` for stable trace/project IDs across runs;
+without it, one random in-process key is used.
 
 ## Fleet sync (macbook + anvil)
 
@@ -63,8 +87,9 @@ for src in cursor claude_code codex grok_build; do
 done
 
 uv run traces verify --in $OUT/combined/redacted
-# If FAIL: drop any redacted JSONL row matching traces.verify.scanner._detection_patterns,
-# re-verify until OK, then export from the clean tree only.
+# If FAIL, make a conservative clean subset by dropping complete flagged rows:
+uv run traces clean --in $OUT/combined/redacted --out $OUT/combined/clean_redacted
+uv run traces verify --in $OUT/combined/clean_redacted
 
 uv run traces export --in $OUT/combined/clean_redacted --out $OUT/combined/export --variant both
 # or export from redacted if verify already OK:
@@ -77,6 +102,8 @@ hf upload Infatoshi/traces $OUT/combined/MANIFEST.json MANIFEST.json --repo-type
 ```
 
 Never publish without a clean `traces verify`.
+The `publish` command independently rescans the exact export directory and
+refuses the upload if any leftover pattern remains.
 
 ## Sources
 
@@ -90,7 +117,10 @@ Never publish without a clean `traces verify`.
 
 No live `cursor_cli` extractor (`~/.cursor/chats`). No gamer host re-extract.
 
-Grok: maps `system|user|assistant|reasoning|tool_result`; assistant `tool_calls` → `tool_uses`; reasoning summary wrapped in `<reasoning>`.
+Grok: maps `system|user|assistant|reasoning|tool_result`; assistant `tool_calls`
+to `tool_uses`; reasoning summary wrapped in `<reasoning>`. The observed local
+summary schema also normalizes model, created/updated times, chat format
+version, reasoning effort, session kind, and sandbox profile.
 
 ## Constraints
 

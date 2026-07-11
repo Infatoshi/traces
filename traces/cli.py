@@ -75,11 +75,31 @@ def redact_cmd(in_dir: str, out_dir: str, allow_public_urls: bool,
 @click.option("--min-turns", type=int, default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--min-assistant-chars", type=int, default=None)
+@click.option("--include-source", "include_sources", multiple=True,
+              help="Include source names; shell globs are accepted.")
 @click.option("--drop-sources", default=None, help="Comma-separated source names to drop")
+@click.option("--project", "projects", multiple=True,
+              help="Include normalized project IDs or paths; shell globs are accepted.")
+@click.option("--model", "models", multiple=True,
+              help="Include model names; shell globs are accepted.")
+@click.option("--status", "statuses", multiple=True,
+              help="Include explicit normalized statuses.")
+@click.option("--reasoning-effort", "reasoning_efforts", multiple=True,
+              help="Include explicit normalized reasoning-effort levels.")
+@click.option("--session-kind", "session_kinds", multiple=True,
+              help="Include explicit normalized session kinds.")
+@click.option("--since", default=None, help="Include traces created at or after this ISO timestamp.")
+@click.option("--until", default=None, help="Include traces created at or before this ISO timestamp.")
+@click.option("--require-tools", is_flag=True)
+@click.option("--require-diffs", is_flag=True)
 @click.option("--dedup", is_flag=True)
 def export_cmd(in_dir: str, out_dir: str, variant: str, min_turns: int | None,
                max_turns: int | None, min_assistant_chars: int | None,
-               drop_sources: str | None, dedup: bool) -> None:
+               include_sources: tuple[str, ...], drop_sources: str | None,
+               projects: tuple[str, ...], models: tuple[str, ...],
+               statuses: tuple[str, ...], reasoning_efforts: tuple[str, ...],
+               session_kinds: tuple[str, ...], since: str | None, until: str | None,
+               require_tools: bool, require_diffs: bool, dedup: bool) -> None:
     """Export redacted conversations to DistillKit-ready formats."""
     from traces.config import ExportConfig
     from traces.export.messages import export_messages
@@ -87,7 +107,13 @@ def export_cmd(in_dir: str, out_dir: str, variant: str, min_turns: int | None,
     config = ExportConfig(
         variant=variant, min_turns=min_turns, max_turns=max_turns,
         min_assistant_chars=min_assistant_chars,
-        drop_sources=drop_sources.split(",") if drop_sources else [],
+        include_sources=list(include_sources),
+        drop_sources=[item.strip() for item in drop_sources.split(",") if item.strip()]
+        if drop_sources else [],
+        projects=list(projects), models=list(models), statuses=list(statuses),
+        reasoning_efforts=list(reasoning_efforts), session_kinds=list(session_kinds),
+        since=since, until=until, require_tools=require_tools,
+        require_diffs=require_diffs,
         dedup=dedup,
     )
     if variant in ("messages", "both"):
@@ -113,6 +139,25 @@ def verify_cmd(in_dir: str) -> None:
         raise click.exceptions.Exit(1)
 
 
+@cli.command("clean")
+@click.option("--in", "in_dir", default="./output/redacted", type=click.Path())
+@click.option("--out", "out_dir", default="./output/clean_redacted", type=click.Path())
+def clean_cmd(in_dir: str, out_dir: str) -> None:
+    """Drop complete JSONL rows that fail the independent verifier."""
+    import json as _json
+
+    from traces.verify.scanner import clean_tree, scan
+
+    output = Path(out_dir)
+    report = clean_tree(Path(in_dir), output)
+    verification = scan(output)
+    if not verification.ok:
+        raise click.ClickException(
+            f"clean output still has {len(verification.leftovers)} leftover(s)"
+        )
+    click.echo(_json.dumps(report, indent=2))
+
+
 @cli.command("publish")
 @click.option("--repo", "repo_id", required=True,
               help="HF Hub dataset repo id, e.g. user/my-traces.")
@@ -121,8 +166,24 @@ def verify_cmd(in_dir: str) -> None:
 @click.option("--private", is_flag=True, help="Create the dataset as private.")
 def publish_cmd(repo_id: str, in_dir: str, variant: str, private: bool) -> None:
     """Upload exported variants + an auto-generated dataset card to HuggingFace Hub."""
+    from traces.verify.scanner import scan
+
+    export_dir = Path(in_dir)
+    report = scan(export_dir)
+    if not report.ok:
+        click.echo(
+            f"Refusing publish: {len(report.leftovers)} leftover(s) found "
+            f"in {report.files_scanned} file(s)."
+        )
+        for finding in report.leftovers[:20]:
+            click.echo(
+                f"  {finding.path}:{finding.line_no} "
+                f"[{finding.category}] {finding.snippet}"
+            )
+        raise click.exceptions.Exit(1)
+
     from traces.publish.huggingface import upload_variant
-    url = upload_variant(Path(in_dir), repo_id, variant=variant, private=private)
+    url = upload_variant(export_dir, repo_id, variant=variant, private=private)
     click.echo(f"Published: {url}")
 
 
@@ -211,7 +272,12 @@ def run_cmd(ctx, sources: str | None, root: str, out: str, variant: str,
         "variant": variant,
         "redaction": redact_report["config"],
         "export": {"min_turns": None, "max_turns": None,
-                   "min_assistant_chars": None, "drop_sources": [], "dedup": False},
+                   "min_assistant_chars": None, "include_sources": [],
+                   "drop_sources": [], "projects": [], "models": [],
+                   "statuses": [], "reasoning_efforts": [], "session_kinds": [],
+                   "since": None, "until": None,
+                   "require_tools": False, "require_diffs": False,
+                   "dedup": False},
     }
     manifest_path = write_manifest(
         out_path, extract_counts, redact_report, export_summaries, config_snapshot

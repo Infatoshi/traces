@@ -51,3 +51,33 @@ def test_stats_empty_dir(tmp_path: Path):
     assert report["turn_count_min"] == 0
     assert report["turn_count_mean"] == 0
     assert report["total_assistant_chars"] == 0
+
+
+def test_stats_deduplicates_the_same_trace_across_export_variants(tmp_path: Path):
+    in_dir = tmp_path / "export"
+    metadata = {
+        "trace_id": "ts_same",
+        "source": "codex",
+        "models": ["model-a"],
+        "counts": {
+            "messages": 2,
+            "assistant_chars": 4,
+            "tool_calls": 1,
+            "diffs": 1,
+        },
+        "token_usage": {"input": 10, "output": 5},
+    }
+    write_jsonl(in_dir / "messages.jsonl", [{"messages": [], "metadata": metadata}])
+    write_jsonl(in_dir / "sharegpt.jsonl", [
+        {"conversations": [], "metadata": {**metadata, "pair": {"index": 0, "count": 1}}},
+    ])
+
+    report = corpus_stats(in_dir)
+
+    assert report["total_rows"] == 2
+    assert report["total_conversations"] == 1
+    assert report["conversations_by_source"] == {"codex": 1}
+    assert report["conversations_by_model"] == {"model-a": 1}
+    assert report["traces_with_tools"] == 1
+    assert report["traces_with_diffs"] == 1
+    assert report["token_usage"] == {"input": 10, "output": 5}

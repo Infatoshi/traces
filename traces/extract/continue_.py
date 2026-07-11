@@ -101,6 +101,7 @@ def extract_continue_sessions(install_dir: Path) -> list[Conversation]:
                     'session_id': data.get('sessionId'),
                     'title': data.get('title'),
                     'workspace': data.get('workspaceDirectory'),
+                    'project_path': data.get('workspaceDirectory'),
                     'source_file': str(session_file),
                     'installation': str(install_dir),
                 })

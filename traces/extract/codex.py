@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+from collections import defaultdict
 from pathlib import Path
 from typing import Iterator
 
@@ -53,80 +54,149 @@ def extract_codex_session(session_file: Path) -> Conversation | None:
     """Extract conversation from a Codex rollout file with full context."""
     messages: list[dict] = []
     session_meta: dict = {}
-    tool_results: list[dict] = []
+    model: str | None = None
+    status: str | None = None
+    updated_at: str | None = None
+    tool_call_count = 0
+    tool_result_count = 0
+    diff_count = 0
+    tool_events: list[dict] = []
+    token_usage: dict[str, int | float] = {}
+    message_origins: dict[tuple[str, str], set[str]] = defaultdict(set)
+    message_indexes: dict[tuple[str, str], int] = {}
+
+    def append_message(
+        role: str, content: object, timestamp: object, *, origin: str,
+        message_model: object = None,
+    ) -> None:
+        if isinstance(content, list):
+            content = "\n".join(
+                str(item.get("text", ""))
+                for item in content
+                if isinstance(item, dict)
+                and item.get("type") in {"input_text", "output_text", "text"}
+            )
+        text = str(content or "").strip()
+        if not text:
+            return
+        key = (role, text)
+        if message_origins[key] and origin not in message_origins[key]:
+            message_origins[key].add(origin)
+            existing = messages[message_indexes[key]]
+            if message_model and not existing.get("model"):
+                existing["model"] = message_model
+            return
+        message_origins[key].add(origin)
+        message = {"role": role, "content": text, "timestamp": timestamp}
+        if message_model:
+            message["model"] = message_model
+        message_indexes[key] = len(messages)
+        messages.append(message)
 
     with open(session_file, 'r') as f:
         for line in f:
             try:
                 obj = json.loads(line)
                 event_type = obj.get('type')
+                if isinstance(obj.get('timestamp'), str):
+                    updated_at = obj['timestamp']
 
                 if event_type == 'session_meta':
-                    session_meta = obj.get('payload', {})
+                    # Subagent rollout files can embed copied parent headers
+                    # after their own header. The first header identifies the
+                    # file being extracted; later headers are conversation data.
+                    if not session_meta:
+                        session_meta = obj.get('payload', {})
+
+                elif event_type == 'turn_context':
+                    payload = obj.get('payload', {})
+                    if isinstance(payload.get('model'), str):
+                        model = payload['model']
 
                 elif event_type == 'event_msg':
                     payload = obj.get('payload', {})
                     payload_type = payload.get('type')
 
                     if payload_type == 'user_message':
-                        message_text = payload.get('message', '').strip()
-                        if message_text:
-                            msg = {
-                                'role': 'user',
-                                'content': message_text,
-                                'timestamp': obj.get('timestamp')
-                            }
-
-                            # Add context if available
-                            if 'context' in payload:
-                                msg['context'] = payload['context']
-
-                            messages.append(msg)
+                        append_message(
+                            'user', payload.get('message'), obj.get('timestamp'),
+                            origin='event_msg',
+                        )
 
                     elif payload_type == 'agent_message':
-                        message_text = payload.get('message', '').strip()
-                        if message_text:
-                            msg = {
-                                'role': 'assistant',
-                                'content': message_text,
-                                'timestamp': obj.get('timestamp')
-                            }
-
-                            # Add model info if available
-                            if 'model' in payload:
-                                msg['model'] = payload['model']
-
-                            messages.append(msg)
+                        append_message(
+                            'assistant', payload.get('message'), obj.get('timestamp'),
+                            origin='event_msg',
+                            message_model=payload.get('model') or model,
+                        )
 
                     elif payload_type == 'tool_use':
-                        # Code execution, file edits, etc.
-                        tool_use = {
+                        tool_call_count += 1
+                        tool_events.append({
                             'type': 'tool_use',
                             'tool': payload.get('tool'),
                             'input': payload.get('input'),
-                            'timestamp': obj.get('timestamp')
-                        }
-                        tool_results.append(tool_use)
+                            'timestamp': obj.get('timestamp'),
+                        })
 
                     elif payload_type == 'tool_result':
-                        # Results from tool execution (diffs, outputs, etc.)
-                        tool_result = {
+                        tool_result_count += 1
+                        tool_events.append({
                             'type': 'tool_result',
                             'tool': payload.get('tool'),
                             'output': payload.get('output'),
-                            'timestamp': obj.get('timestamp')
-                        }
-                        tool_results.append(tool_result)
+                            'timestamp': obj.get('timestamp'),
+                        })
 
                     elif payload_type == 'diff':
-                        # Code diffs
-                        diff = {
+                        diff_count += 1
+                        tool_events.append({
                             'type': 'diff',
                             'file': payload.get('file'),
                             'diff': payload.get('diff'),
-                            'timestamp': obj.get('timestamp')
-                        }
-                        tool_results.append(diff)
+                            'timestamp': obj.get('timestamp'),
+                        })
+
+                    elif payload_type == 'patch_apply_end':
+                        changes = payload.get('changes')
+                        if isinstance(changes, (dict, list)):
+                            diff_count += len(changes)
+
+                    elif payload_type == 'task_complete':
+                        status = 'completed'
+
+                    elif payload_type == 'turn_aborted':
+                        status = 'aborted'
+
+                    elif payload_type == 'token_count':
+                        info = payload.get('info')
+                        totals = info.get('total_token_usage') if isinstance(info, dict) else None
+                        if isinstance(totals, dict):
+                            for source_key, target_key in (
+                                ('input_tokens', 'input'),
+                                ('cached_input_tokens', 'cached_input'),
+                                ('output_tokens', 'output'),
+                                ('reasoning_output_tokens', 'reasoning'),
+                                ('total_tokens', 'total'),
+                            ):
+                                value = totals.get(source_key)
+                                if isinstance(value, (int, float)):
+                                    token_usage[target_key] = value
+
+                elif event_type == 'response_item':
+                    payload = obj.get('payload', {})
+                    payload_type = payload.get('type')
+                    if payload_type == 'message' and payload.get('role') in {'user', 'assistant'}:
+                        role = payload['role']
+                        append_message(
+                            role, payload.get('content'), obj.get('timestamp'),
+                            origin='response_item',
+                            message_model=model if role == 'assistant' else None,
+                        )
+                    elif payload_type in {'function_call', 'custom_tool_call'}:
+                        tool_call_count += 1
+                    elif payload_type in {'function_call_output', 'custom_tool_call_output'}:
+                        tool_result_count += 1
 
             except json.JSONDecodeError:
                 continue
@@ -136,13 +206,29 @@ def extract_codex_session(session_file: Path) -> Conversation | None:
             'messages': messages,
             'session_id': session_meta.get('id'),
             'cwd': session_meta.get('cwd'),
+            'project_path': session_meta.get('cwd'),
             'source': 'codex',
             'session_file': str(session_file),
-            'timestamp': session_meta.get('timestamp')
+            'timestamp': session_meta.get('timestamp'),
+            'created_at': session_meta.get('timestamp'),
+            'updated_at': updated_at,
+            'version': session_meta.get('cli_version'),
         }
 
-        if tool_results:
-            conv['tool_results'] = tool_results
+        if model:
+            conv['model'] = model
+        if status:
+            conv['status'] = status
+        if token_usage:
+            conv['token_usage'] = token_usage
+        if tool_call_count:
+            conv['tool_call_count'] = tool_call_count
+        if tool_result_count:
+            conv['tool_result_count'] = tool_result_count
+        if diff_count:
+            conv['diff_count'] = diff_count
+        if tool_events:
+            conv['tool_results'] = tool_events
 
         return conv
 

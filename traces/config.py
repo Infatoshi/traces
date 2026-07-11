@@ -26,5 +26,16 @@ class ExportConfig:
     min_turns: int | None = None
     max_turns: int | None = None
     min_assistant_chars: int | None = None
+    include_sources: list[str] = field(default_factory=list)
     drop_sources: list[str] = field(default_factory=list)
+    projects: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
+    statuses: list[str] = field(default_factory=list)
+    reasoning_efforts: list[str] = field(default_factory=list)
+    session_kinds: list[str] = field(default_factory=list)
+    since: str | None = None
+    until: str | None = None
+    require_tools: bool = False
+    require_diffs: bool = False
     dedup: bool = False
+    metadata_key: str | None = None

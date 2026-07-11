@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from traces.redact import gitleaks, llm_residue
@@ -134,6 +135,10 @@ def test_privacy_filter_not_imported_at_module_load():
 # ---------------------------------------------------------------------------
 # llm-residue layer
 # ---------------------------------------------------------------------------
+
+def test_llm_residue_http_rejects_non_http_url() -> None:
+    with pytest.raises(ValueError, match=r"HTTP\(S\)"):
+        llm_residue.http_json("file:///private/etc/passwd")
 
 def test_llm_residue_pass_applies_model_redactions(tmp_path):
     redacted = tmp_path / "redacted"

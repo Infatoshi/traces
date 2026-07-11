@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
 
 from traces.config import ExportConfig
+from traces.export.filters import dedup_key, filter_reason
 from traces.export.flatten import flatten_message
-from traces.export.filters import passes, dedup_key
+from traces.export.metadata import build_metadata
 
 
 def _iter_conversations(in_dir: Path) -> Iterator[dict[str, Any]]:
@@ -42,12 +44,16 @@ def export_sharegpt(in_dir: Path, out_file: Path, config: ExportConfig) -> dict:
     dropped_trailing_user = 0
     dropped_filter = 0
     dropped_dedup = 0
+    dropped_by_reason: Counter[str] = Counter()
+    pairs_by_source: Counter[str] = Counter()
     seen: set[str] = set()
 
     with out_file.open("w") as f:
         for conv in _iter_conversations(in_dir):
-            if not passes(conv, config):
+            reason = filter_reason(conv, config)
+            if reason:
                 dropped_filter += 1
+                dropped_by_reason[reason] += 1
                 continue
             if config.dedup:
                 k = dedup_key(conv)
@@ -69,6 +75,7 @@ def export_sharegpt(in_dir: Path, out_file: Path, config: ExportConfig) -> dict:
                 if not has_trailing_user:
                     dropped_no_assistant += 1
                 continue
+            base_metadata = build_metadata(conv, metadata_key=config.metadata_key)
             for idx, (u, a) in enumerate(pairs):
                 convs: list[dict[str, str]] = []
                 if idx == 0:
@@ -76,8 +83,19 @@ def export_sharegpt(in_dir: Path, out_file: Path, config: ExportConfig) -> dict:
                         convs.append({"from": "system", "value": flatten_message(sm)})
                 convs.append({"from": "human", "value": flatten_message(u)})
                 convs.append({"from": "gpt", "value": flatten_message(a)})
-                f.write(json.dumps({"conversations": convs}, ensure_ascii=False) + "\n")
+                metadata = {
+                    **base_metadata,
+                    "pair": {"index": idx, "count": len(pairs)},
+                }
+                f.write(
+                    json.dumps(
+                        {"conversations": convs, "metadata": metadata},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
                 pairs_written += 1
+                pairs_by_source[base_metadata["source"]] += 1
 
     return {
         "pairs": pairs_written,
@@ -85,4 +103,6 @@ def export_sharegpt(in_dir: Path, out_file: Path, config: ExportConfig) -> dict:
         "dropped_trailing_user": dropped_trailing_user,
         "dropped_filter": dropped_filter,
         "dropped_dedup": dropped_dedup,
+        "dropped_by_reason": dict(dropped_by_reason),
+        "by_source": dict(pairs_by_source),
     }
