@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from traces.stats import corpus_stats
 from tests.conftest import make_conversation, make_message, write_jsonl
+from traces.stats import corpus_stats
 
 
 def test_stats_happy_path(tmp_path: Path):

@@ -1,109 +1,76 @@
-Home: Mac-native — canonical at macbook:/Users/infatoshi/dev/tools/traces. GitHub Infatoshi/traces. HF private dataset Infatoshi/traces. Anvil is extract target only (rsync tool + pull output); do not treat anvil as source of truth for this repo.
+# traces — agent / developer commands
 
-# traces — commands
+CLI entrypoint: `traces`. Always prefer `uv`.
 
-Always `uv`. CLI entrypoint: `traces`.
+Package name on PyPI: `coding-agent-traces`. Import path and console script stay
+`traces`.
 
 ## Install / test
 
 ```bash
-cd /Users/infatoshi/dev/tools/traces
-uv sync --extra dev --extra publish   # or: uv pip install -e ".[dev,publish]"
+uv sync --extra dev --extra publish
 uv run pytest -q
 uv run ruff check . --fix
 ```
 
-Optional: `gitleaks` binary for `--gitleaks` / `--gitleaks-fix`. Privacy filter: `--extra privacy-filter`.
+Optional: `gitleaks` for `--gitleaks` / `--gitleaks-fix`. Privacy filter:
+`--extra privacy-filter`.
 
 ## One-host pipeline
 
 ```bash
 uv run traces run --sources cursor,claude_code,codex,grok_build \
-  --out /tmp/traces-out --variant both \
-  --user infatoshi --home "$HOME"
+  --out /tmp/traces-out --variant all \
+  --user "$USER" --home "$HOME"
 
 uv run traces verify --in /tmp/traces-out/redacted
 uv run traces stats  --in /tmp/traces-out/export
 uv run traces sample --in /tmp/traces-out/export -n 5 --out /tmp/traces-preview
 ```
 
-Output layout: `raw_extracted/`, `redacted/`, `export/{messages,sharegpt}.jsonl`, `MANIFEST.json`.
+Output layout: `raw_extracted/`, `redacted/`, 
+`export/{messages,sharegpt,execution,assistant_steps}.jsonl`, `MANIFEST.json`.
 
-Stage commands if needed: `traces extract|redact|clean|export|verify|stats|sample|publish`.
+`--variant both` means `messages` + `sharegpt`. Use `--variant all` for native
+execution exports as well. `execution.jsonl` splits at real user turns and
+preserves native call/result IDs, arguments, outputs, statuses, and structured
+result metadata plus `assistant_steps[].message_index`. `assistant_steps.jsonl`
+joins to execution rows by `execution_id`. For index `i`, `messages[:i]` is
+context and `messages[i]` is the target. System/user/tool messages are never
+targets. `--variant steps` also writes `execution.jsonl`.
 
-Filtered export example:
+Stage commands: `traces extract|redact|clean|export|verify|stats|sample|publish`.
+
+Filtered export:
 
 ```bash
 TRACES_METADATA_KEY='<stable local key>' \
 uv run traces export --in /tmp/traces-out/redacted --out /tmp/traces-out/filtered \
   --include-source 'grok_build' --model '*grok*' \
   --reasoning-effort high --session-kind subagent \
-  --since 2026-07-01T00:00:00Z --require-tools --dedup
+  --since 2026-07-01T00:00:00Z --require-tools \
+  --require-complete-tools --require-final-assistant --dedup \
+  --variant all
 ```
 
-Available export filters: `--include-source`, `--drop-sources`, `--project`,
-`--model`, `--status`, `--reasoning-effort`, `--session-kind`, `--since`,
-`--until`, `--min-turns`, `--max-turns`,
-`--min-assistant-chars`, `--require-tools`, `--require-diffs`, and `--dedup`.
-Shell globs are accepted for source, project, and model. Export summaries report
-the first drop reason for each excluded conversation.
+Filters: `--include-source`, `--drop-sources`, `--project`, `--model`,
+`--status`, `--reasoning-effort`, `--session-kind`, `--since`, `--until`,
+`--min-turns`, `--max-turns`, `--min-assistant-chars`, `--require-tools`,
+`--require-diffs`, `--require-complete-tools`, `--require-final-assistant`,
+`--dedup`. Shell globs accepted for source, project, and model.
 
-Every exported row has metadata schema `1.0`: an opaque trace ID, exact source,
-day-bucketed session fields, an opaque project ID, model names, message/tool/
-diff counts, and normalized token totals when the adapter provides them. Raw
-session IDs, paths, titles, message IDs, tool payloads, and source files are not
-published. Set `TRACES_METADATA_KEY` for stable trace/project IDs across runs;
-without it, one random in-process key is used.
+Structural completeness is not a success label. Prefer explicit test exit codes
+from tool-result metadata or join traces to benchmark/run artifacts. Never infer
+success merely from final assistant prose.
 
-## Fleet sync (macbook + anvil)
+Every exported row has metadata schema `1.0`: opaque trace ID, exact source,
+day-bucketed session fields, opaque project ID, model names, message/tool/diff
+counts, and normalized token totals when the adapter provides them. Raw session
+IDs, paths, titles, message IDs, tool payloads, and source files are not
+published. Set `TRACES_METADATA_KEY` for stable IDs across runs; without it, one
+random in-process key is used.
 
-```bash
-cd /Users/infatoshi/dev/tools/traces
-OUT=/tmp/traces-sync
-SOURCES=cursor,claude_code,codex,grok_build
-
-uv run traces run --sources $SOURCES \
-  --out $OUT/mac --variant both --user infatoshi --home /Users/infatoshi
-
-rsync -a --delete --exclude .git --exclude .venv --exclude .pytest_cache \
-  --exclude .ruff_cache --exclude '*.egg-info' \
-  ./ anvil:/tmp/traces-repo/
-ssh anvil 'bash -lc "cd /tmp/traces-repo && uv run traces run \
-  --sources cursor,claude_code,codex,grok_build \
-  --out /tmp/traces-sync/anvil --variant both \
-  --user infatoshi --home /home/infatoshi"'
-mkdir -p $OUT/anvil
-rsync -a anvil:/tmp/traces-sync/anvil/ $OUT/anvil/
-```
-
-Combine redacted, verify, clean if needed, publish:
-
-```bash
-mkdir -p $OUT/combined/redacted $OUT/combined/export
-for src in cursor claude_code codex grok_build; do
-  : > $OUT/combined/redacted/$src.jsonl
-  [ -f $OUT/mac/redacted/$src.jsonl ] && cat $OUT/mac/redacted/$src.jsonl >> $OUT/combined/redacted/$src.jsonl
-  [ -f $OUT/anvil/redacted/$src.jsonl ] && cat $OUT/anvil/redacted/$src.jsonl >> $OUT/combined/redacted/$src.jsonl
-done
-
-uv run traces verify --in $OUT/combined/redacted
-# If FAIL, make a conservative clean subset by dropping complete flagged rows:
-uv run traces clean --in $OUT/combined/redacted --out $OUT/combined/clean_redacted
-uv run traces verify --in $OUT/combined/clean_redacted
-
-uv run traces export --in $OUT/combined/clean_redacted --out $OUT/combined/export --variant both
-# or export from redacted if verify already OK:
-# uv run traces export --in $OUT/combined/redacted --out $OUT/combined/export --variant both
-
-uv run --extra publish traces publish \
-  --repo Infatoshi/traces \
-  --in $OUT/combined/export --variant both --private
-hf upload Infatoshi/traces $OUT/combined/MANIFEST.json MANIFEST.json --repo-type dataset
-```
-
-Never publish without a clean `traces verify`.
-The `publish` command independently rescans the exact export directory and
-refuses the upload if any leftover pattern remains.
+Multi-host extract/combine: [docs/multi-host.md](./docs/multi-host.md).
 
 ## Sources
 
@@ -115,16 +82,30 @@ refuses the upload if any leftover pattern remains.
 | `grok_build` | `~/.grok/sessions/**/chat_history.jsonl` (+ `summary.json`) |
 | `continue` / `gemini` / `opencode` / `trae` / `windsurf` | as implemented |
 
-No live `cursor_cli` extractor (`~/.cursor/chats`). No gamer host re-extract.
+No live `cursor_cli` extractor (`~/.cursor/chats`).
 
-Grok: maps `system|user|assistant|reasoning|tool_result`; assistant `tool_calls`
-to `tool_uses`; reasoning summary wrapped in `<reasoning>`. The observed local
-summary schema also normalizes model, created/updated times, chat format
-version, reasoning effort, session kind, and sandbox profile.
+Grok Build: maps `system|user|assistant|reasoning|tool_result`; assistant
+`tool_calls` to `tool_uses`; reasoning summary wrapped in `<reasoning>`. Summary
+schema also normalizes model, created/updated times, chat format version,
+reasoning effort, session kind, and sandbox profile.
+
+Current-format notes:
+
+- Claude main and `agent-*` subagent sessions are retained; wrapped tool-result
+  content and structured `toolUseResult` details are preserved.
+- Codex modern `function_call` / `custom_tool_call` and output records are
+  emitted as correlated messages rather than counts only.
+- OpenCode reads both legacy JSON storage and current read-only `opencode.db`;
+  ordered parts preserve call/result causality and shell exit metadata.
+- Gemini preserves the full recorded `toolCalls[].result` payload.
+- Native/step exports omit provider reasoning records from assistant targets.
 
 ## Constraints
 
-- Identity is CLI flags (`--user`, `--home`), never hardcoded in library defaults for publish.
-- Canonical HF dataset name is `Infatoshi/traces` only (old `ai-coding-sessions-tracesmith` retired).
-- Tool remote is `Infatoshi/traces`. Ignore `RESMP-DEV/tracesmith` and `~/dev/tools/tracesmith` unless explicitly asked.
-- KernelBench traces stay on native `kb push-runs` — do not route through this tool.
+- Identity is CLI flags (`--user`, `--home`), never hardcoded library defaults
+  for publish.
+- Never publish without a clean `traces verify`. The `publish` command rescans
+  the export directory and refuses upload on leftovers.
+- Do not commit `out/`, raw extracts, or redacted personal corpora.
+- KernelBench published runs use native project tooling, not this CLI, unless a
+  project explicitly routes through it.

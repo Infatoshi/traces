@@ -2,10 +2,16 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 .venv/
+dist/
+build/
+out/
 output/
 extracted_data/
 redacted-agent-traces/
 *.jsonl
 !tests/**/*.jsonl
 !examples/**/*.jsonl
+.DS_Store
+*.profraw

@@ -5,6 +5,10 @@ from pathlib import Path
 
 import click
 
+EXPORT_VARIANTS = [
+    "messages", "sharegpt", "execution", "steps", "both", "all"
+]
+
 
 @click.group()
 def cli() -> None:
@@ -71,7 +75,7 @@ def redact_cmd(in_dir: str, out_dir: str, allow_public_urls: bool,
 @cli.command("export")
 @click.option("--in", "in_dir", default="./output/redacted", type=click.Path())
 @click.option("--out", "out_dir", default="./output/export", type=click.Path())
-@click.option("--variant", default="both", type=click.Choice(["messages", "sharegpt", "both"]))
+@click.option("--variant", default="both", type=click.Choice(EXPORT_VARIANTS))
 @click.option("--min-turns", type=int, default=None)
 @click.option("--max-turns", type=int, default=None)
 @click.option("--min-assistant-chars", type=int, default=None)
@@ -92,6 +96,10 @@ def redact_cmd(in_dir: str, out_dir: str, allow_public_urls: bool,
 @click.option("--until", default=None, help="Include traces created at or before this ISO timestamp.")
 @click.option("--require-tools", is_flag=True)
 @click.option("--require-diffs", is_flag=True)
+@click.option("--require-complete-tools", is_flag=True,
+              help="Require every native tool call/result ID to be matched.")
+@click.option("--require-final-assistant", is_flag=True,
+              help="Require the execution to end with assistant text.")
 @click.option("--dedup", is_flag=True)
 def export_cmd(in_dir: str, out_dir: str, variant: str, min_turns: int | None,
                max_turns: int | None, min_assistant_chars: int | None,
@@ -99,9 +107,12 @@ def export_cmd(in_dir: str, out_dir: str, variant: str, min_turns: int | None,
                projects: tuple[str, ...], models: tuple[str, ...],
                statuses: tuple[str, ...], reasoning_efforts: tuple[str, ...],
                session_kinds: tuple[str, ...], since: str | None, until: str | None,
-               require_tools: bool, require_diffs: bool, dedup: bool) -> None:
+               require_tools: bool, require_diffs: bool,
+               require_complete_tools: bool, require_final_assistant: bool,
+               dedup: bool) -> None:
     """Export redacted conversations to DistillKit-ready formats."""
     from traces.config import ExportConfig
+    from traces.export.execution import export_assistant_steps, export_execution
     from traces.export.messages import export_messages
     from traces.export.sharegpt import export_sharegpt
     config = ExportConfig(
@@ -114,14 +125,26 @@ def export_cmd(in_dir: str, out_dir: str, variant: str, min_turns: int | None,
         reasoning_efforts=list(reasoning_efforts), session_kinds=list(session_kinds),
         since=since, until=until, require_tools=require_tools,
         require_diffs=require_diffs,
+        require_complete_tools=require_complete_tools,
+        require_final_assistant=require_final_assistant,
         dedup=dedup,
     )
-    if variant in ("messages", "both"):
+    if variant in ("messages", "both", "all"):
         s = export_messages(Path(in_dir), Path(out_dir) / "messages.jsonl", config)
         click.echo(f"messages.jsonl: {s}")
-    if variant in ("sharegpt", "both"):
+    if variant in ("sharegpt", "both", "all"):
         s = export_sharegpt(Path(in_dir), Path(out_dir) / "sharegpt.jsonl", config)
         click.echo(f"sharegpt.jsonl: {s}")
+    if variant in ("execution", "steps", "all"):
+        s = export_execution(
+            Path(in_dir), Path(out_dir) / "execution.jsonl", config
+        )
+        click.echo(f"execution.jsonl: {s}")
+    if variant in ("steps", "all"):
+        s = export_assistant_steps(
+            Path(in_dir), Path(out_dir) / "assistant_steps.jsonl", config
+        )
+        click.echo(f"assistant_steps.jsonl: {s}")
 
 
 @cli.command("verify")
@@ -162,7 +185,7 @@ def clean_cmd(in_dir: str, out_dir: str) -> None:
 @click.option("--repo", "repo_id", required=True,
               help="HF Hub dataset repo id, e.g. user/my-traces.")
 @click.option("--in", "in_dir", default="./output/export", type=click.Path())
-@click.option("--variant", default="both", type=click.Choice(["messages", "sharegpt", "both"]))
+@click.option("--variant", default="both", type=click.Choice(EXPORT_VARIANTS))
 @click.option("--private", is_flag=True, help="Create the dataset as private.")
 def publish_cmd(repo_id: str, in_dir: str, variant: str, private: bool) -> None:
     """Upload exported variants + an auto-generated dataset card to HuggingFace Hub."""
@@ -192,6 +215,7 @@ def publish_cmd(repo_id: str, in_dir: str, variant: str, private: bool) -> None:
 def stats_cmd(in_dir: str) -> None:
     """Report corpus metrics across the exported *.jsonl files."""
     import json as _json
+
     from traces.stats import corpus_stats
     report = corpus_stats(Path(in_dir))
     click.echo(_json.dumps(report, indent=2))
@@ -217,7 +241,7 @@ def sample_cmd(in_dir: str, n: int, seed: int, out_dir: str | None) -> None:
 @click.option("--sources", default=None)
 @click.option("--root", default="~")
 @click.option("--out", default="./output", type=click.Path())
-@click.option("--variant", default="both", type=click.Choice(["messages", "sharegpt", "both"]))
+@click.option("--variant", default="both", type=click.Choice(EXPORT_VARIANTS))
 @click.option("--user", "user_name", default=None)
 @click.option("--home", "home_dir", default=None)
 @click.pass_context
@@ -230,6 +254,7 @@ def run_cmd(ctx, sources: str | None, root: str, out: str, variant: str,
     report, export summaries) are available to feed into the MANIFEST writer.
     """
     from traces.config import ExportConfig, RedactorConfig
+    from traces.export.execution import export_assistant_steps, export_execution
     from traces.export.messages import export_messages
     from traces.export.sharegpt import export_sharegpt
     from traces.extract.discovery import run_extract
@@ -256,16 +281,30 @@ def run_cmd(ctx, sources: str | None, root: str, out: str, variant: str,
     export_config = ExportConfig(variant=variant)
     export_summaries: dict[str, dict] = {}
     export_dir = out_path / "export"
-    if variant in ("messages", "both"):
+    if variant in ("messages", "both", "all"):
         export_summaries["messages"] = export_messages(
             out_path / "redacted", export_dir / "messages.jsonl", export_config
         )
         click.echo(f"export messages: {export_summaries['messages']['rows']} rows")
-    if variant in ("sharegpt", "both"):
+    if variant in ("sharegpt", "both", "all"):
         export_summaries["sharegpt"] = export_sharegpt(
             out_path / "redacted", export_dir / "sharegpt.jsonl", export_config
         )
         click.echo(f"export sharegpt: {export_summaries['sharegpt']['pairs']} pairs")
+    if variant in ("execution", "steps", "all"):
+        export_summaries["execution"] = export_execution(
+            out_path / "redacted", export_dir / "execution.jsonl", export_config
+        )
+        click.echo(
+            f"export execution: {export_summaries['execution']['rows']} rows"
+        )
+    if variant in ("steps", "all"):
+        export_summaries["steps"] = export_assistant_steps(
+            out_path / "redacted",
+            export_dir / "assistant_steps.jsonl",
+            export_config,
+        )
+        click.echo(f"export steps: {export_summaries['steps']['rows']} rows")
 
     # Stage 4: MANIFEST.json.
     config_snapshot = {
@@ -277,6 +316,8 @@ def run_cmd(ctx, sources: str | None, root: str, out: str, variant: str,
                    "statuses": [], "reasoning_efforts": [], "session_kinds": [],
                    "since": None, "until": None,
                    "require_tools": False, "require_diffs": False,
+                   "require_complete_tools": False,
+                   "require_final_assistant": False,
                    "dedup": False},
     }
     manifest_path = write_manifest(

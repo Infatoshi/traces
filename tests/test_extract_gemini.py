@@ -113,6 +113,7 @@ def test_extracts_current_gemini_tool_shape_observed_in_local_sessions(tmp_path)
         "tool_call_id": "call-1",
         "tool": "run_shell_command",
         "status": "success",
+        "output": [{"functionResponse": {"id": "call-1"}}],
     }]
 
 

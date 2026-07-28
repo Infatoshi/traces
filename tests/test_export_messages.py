@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
+from tests.conftest import make_conversation, make_message, write_jsonl
 from traces.config import ExportConfig
 from traces.export.messages import export_messages
-from tests.conftest import make_conversation, make_message, write_jsonl
 
 
 def test_export_one_conversation(tmp_path):

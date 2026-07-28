@@ -15,7 +15,6 @@ from traces.extract.opencode import OpenCodeExtractor
 from traces.extract.trae import TraeExtractor
 from traces.extract.windsurf import WindsurfExtractor
 
-
 EXTRACTORS: dict[str, type[Extractor]] = {
     "claude_code": ClaudeCodeExtractor,
     "codex": CodexExtractor,

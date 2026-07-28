@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-
 # --- Secrets / PII canaries (the kinds the redactor must catch) ---
 CANARY_OPENAI_KEY = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"
 CANARY_GITHUB_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"

@@ -9,8 +9,8 @@ import json
 import os
 import platform
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -87,7 +87,7 @@ def extract_windsurf_chat(db_path, workspace_id) -> list[Conversation]:
                                     }
 
                                     # Extract code context
-                                    if 'selections' in bubble and bubble['selections']:
+                                    if bubble.get('selections'):
                                         ctx = []
                                         for sel in bubble['selections']:
                                             if 'uri' in sel and 'fsPath' in sel['uri']:
@@ -118,12 +118,12 @@ def extract_windsurf_chat(db_path, workspace_id) -> list[Conversation]:
 
                     break  # Found data, no need to try other keys
 
-            except Exception:  # noqa: BLE001 - upstream swallows per-key errors
+            except Exception:
                 continue
 
         conn.close()
 
-    except Exception:  # noqa: BLE001 - upstream swallows DB-level errors
+    except Exception:
         pass
 
     return conversations
@@ -218,7 +218,7 @@ def extract_windsurf_agent(global_db_path) -> list[Conversation]:
                     conv = extract_agent_conversation(data, key)
                     if conv:
                         conversations.append(conv)
-                except Exception:  # noqa: BLE001 - upstream swallows per-row errors
+                except Exception:
                     continue
 
         # Also check ItemTable
@@ -235,12 +235,12 @@ def extract_windsurf_agent(global_db_path) -> list[Conversation]:
                     conv = extract_agent_conversation(data, key)
                     if conv:
                         conversations.append(conv)
-                except Exception:  # noqa: BLE001 - upstream swallows per-row errors
+                except Exception:
                     continue
 
         conn.close()
 
-    except Exception:  # noqa: BLE001 - upstream swallows DB-level errors
+    except Exception:
         pass
 
     return conversations

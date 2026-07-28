@@ -75,14 +75,14 @@ UPSTREAM_ORDER = [
 ]
 
 __all__ = [
+    "UPSTREAM_ORDER",
+    "PlaceholderBook",
     "Rule",
     "RuleContext",
-    "UPSTREAM_ORDER",
     "build_patterns",
     "is_allowed_url",
-    "redact_string",
     "make_redactor",
-    "PlaceholderBook",
+    "redact_string",
 ]
 
 

@@ -17,8 +17,8 @@ import json
 import os
 import platform
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -123,7 +123,7 @@ def extract_aiservice_conversations(db_path, workspace_id):
                     conversations.append(conv)
 
         conn.close()
-    except Exception:  # noqa: BLE001 - upstream swallows errors
+    except Exception:
         pass
 
     return conversations
@@ -197,14 +197,14 @@ def extract_workspace_composers(db_path, workspace_id):
                                 elif 'modelName' in bubble:
                                     msg['model'] = bubble['modelName']
 
-                                if 'codeBlocks' in bubble and bubble['codeBlocks']:
+                                if bubble.get('codeBlocks'):
                                     msg['code_blocks'] = bubble['codeBlocks']
 
-                                if 'suggestedCodeBlocks' in bubble and bubble['suggestedCodeBlocks']:
+                                if bubble.get('suggestedCodeBlocks'):
                                     msg['suggested_code_blocks'] = bubble['suggestedCodeBlocks']
                                     diffs.extend(bubble['suggestedCodeBlocks'])
 
-                                if 'diffHistories' in bubble and bubble['diffHistories']:
+                                if bubble.get('diffHistories'):
                                     msg['diff_histories'] = bubble['diffHistories']
                                     diffs.extend(bubble['diffHistories'])
 
@@ -231,7 +231,7 @@ def extract_workspace_composers(db_path, workspace_id):
                             })
 
         conn.close()
-    except Exception:  # noqa: BLE001 - upstream swallows errors
+    except Exception:
         pass
 
     return conversations
@@ -265,7 +265,7 @@ def extract_chat_mode(db_path, workspace_id):
                                 'content': content
                             }
 
-                            if 'selections' in bubble and bubble['selections']:
+                            if bubble.get('selections'):
                                 ctx = []
                                 for sel in bubble['selections']:
                                     if 'uri' in sel and 'fsPath' in sel['uri']:
@@ -278,7 +278,7 @@ def extract_chat_mode(db_path, workspace_id):
                                     msg['code_context'] = ctx
                                     code_context.extend(ctx)
 
-                            if 'suggestedDiffs' in bubble and bubble['suggestedDiffs']:
+                            if bubble.get('suggestedDiffs'):
                                 msg['suggested_diffs'] = bubble['suggestedDiffs']
                                 suggested_diffs.extend(bubble['suggestedDiffs'])
 
@@ -296,7 +296,7 @@ def extract_chat_mode(db_path, workspace_id):
                             })
 
         conn.close()
-    except Exception:  # noqa: BLE001 - upstream swallows errors
+    except Exception:
         pass
 
     return conversations
@@ -355,16 +355,16 @@ def extract_bubbles_for_composer(cursor, composer_id):
                     elif 'modelName' in bubble_data:
                         msg['model'] = bubble_data['modelName']
 
-                    if 'codeBlocks' in bubble_data and bubble_data['codeBlocks']:
+                    if bubble_data.get('codeBlocks'):
                         msg['code_blocks'] = bubble_data['codeBlocks']
 
-                    if 'suggestedCodeBlocks' in bubble_data and bubble_data['suggestedCodeBlocks']:
+                    if bubble_data.get('suggestedCodeBlocks'):
                         msg['suggested_code_blocks'] = bubble_data['suggestedCodeBlocks']
 
-                    if 'diffHistories' in bubble_data and bubble_data['diffHistories']:
+                    if bubble_data.get('diffHistories'):
                         msg['diff_histories'] = bubble_data['diffHistories']
 
-                    if 'toolResults' in bubble_data and bubble_data['toolResults']:
+                    if bubble_data.get('toolResults'):
                         msg['tool_results'] = bubble_data['toolResults']
 
                 bubbles.append(msg)
@@ -372,7 +372,7 @@ def extract_bubbles_for_composer(cursor, composer_id):
             except json.JSONDecodeError:
                 continue
 
-    except Exception:  # noqa: BLE001 - upstream swallows errors
+    except Exception:
         pass
 
     return bubbles
@@ -445,14 +445,14 @@ def extract_global_composers(global_db_path):
                             elif 'modelName' in bubble:
                                 msg['model'] = bubble['modelName']
 
-                            if 'codeBlocks' in bubble and bubble['codeBlocks']:
+                            if bubble.get('codeBlocks'):
                                 msg['code_blocks'] = bubble['codeBlocks']
 
-                            if 'suggestedCodeBlocks' in bubble and bubble['suggestedCodeBlocks']:
+                            if bubble.get('suggestedCodeBlocks'):
                                 msg['suggested_code_blocks'] = bubble['suggestedCodeBlocks']
                                 diffs.extend(bubble['suggestedCodeBlocks'])
 
-                            if 'diffHistories' in bubble and bubble['diffHistories']:
+                            if bubble.get('diffHistories'):
                                 msg['diff_histories'] = bubble['diffHistories']
                                 diffs.extend(bubble['diffHistories'])
 
@@ -497,7 +497,7 @@ def extract_global_composers(global_db_path):
                 continue
 
         conn.close()
-    except Exception as e:  # noqa: BLE001 - upstream prints but continues
+    except Exception as e:
         print(f"Error extracting global composers: {e}")
 
     return conversations

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import struct
 from pathlib import Path
 
@@ -131,6 +132,105 @@ def test_extract_cli_empty_install(tmp_path):
     install = tmp_path / "opencode"
     (install / "storage" / "message").mkdir(parents=True)
     assert list(OpenCodeExtractor().extract(install)) == []
+
+
+def test_extract_current_sqlite_tool_result_and_exit_metadata(tmp_path):
+    install = tmp_path / "opencode"
+    install.mkdir()
+    database = install / "opencode.db"
+    connection = sqlite3.connect(database)
+    connection.executescript("""
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT,
+            directory TEXT, title TEXT, version TEXT, time_created INTEGER,
+            time_updated INTEGER, model TEXT, tokens_input INTEGER,
+            tokens_output INTEGER, tokens_reasoning INTEGER,
+            tokens_cache_read INTEGER, tokens_cache_write INTEGER
+        );
+        CREATE TABLE message (
+            id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER,
+            time_updated INTEGER, data TEXT
+        );
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+            time_created INTEGER, time_updated INTEGER, data TEXT
+        );
+    """)
+    connection.execute(
+        "INSERT INTO session VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "ses_sql", "proj", None, "slug", "/work/project", "title", "1",
+            1000, 2000, "model-a", 10, 5, 2, 3, 1,
+        ),
+    )
+    connection.execute(
+        "INSERT INTO message VALUES (?,?,?,?,?)",
+        ("msg_u", "ses_sql", 1000, 1000, json.dumps({"role": "user"})),
+    )
+    connection.execute(
+        "INSERT INTO message VALUES (?,?,?,?,?)",
+        (
+            "msg_a", "ses_sql", 2000, 2000,
+            json.dumps({
+                "role": "assistant",
+                "model": {"modelID": "model-a", "providerID": "provider-a"},
+            }),
+        ),
+    )
+    parts = [
+        ("p1", "msg_u", 1000, {"type": "text", "text": "run tests"}),
+        (
+            "p2", "msg_a", 2000,
+            {
+                "type": "tool", "tool": "bash", "callID": "call-1",
+                "state": {
+                    "status": "completed",
+                    "input": {"command": "pytest -q"},
+                    "output": "passed",
+                    "metadata": {"exit": 0},
+                },
+            },
+        ),
+        ("p3", "msg_a", 2001, {"type": "text", "text": "done"}),
+        ("p4", "msg_a", 2002, {"type": "step-finish", "reason": "stop"}),
+        (
+            "p5", "msg_a", 2003,
+            {"type": "patch", "hash": "a" * 40, "files": ["example.py"]},
+        ),
+    ]
+    for part_id, message_id, timestamp, data in parts:
+        connection.execute(
+            "INSERT INTO part VALUES (?,?,?,?,?,?)",
+            (part_id, message_id, "ses_sql", timestamp, timestamp, json.dumps(data)),
+        )
+    connection.commit()
+    connection.close()
+
+    conversations = list(OpenCodeExtractor().extract(install))
+
+    assert len(conversations) == 1
+    conversation = conversations[0]
+    assert conversation["status"] == "completed"
+    assert conversation["project_path"] == "/work/project"
+    assert conversation["token_usage"] == {
+        "input": 10,
+        "output": 5,
+        "reasoning": 2,
+        "cached_input": 3,
+        "cache_write": 1,
+    }
+    assistant_call = conversation["messages"][1]
+    tool_result = conversation["messages"][2]["tool_result"]
+    assert assistant_call["tool_calls"][0]["input"] == {
+        "command": "pytest -q"
+    }
+    assert tool_result["metadata"] == {"exit": 0}
+    assert tool_result["output"] == "passed"
+    assert conversation["messages"][3]["content"] == "done"
+    assert conversation["messages"][3]["diffs"] == [{
+        "files": ["example.py"],
+        "hash": "a" * 40,
+    }]
 
 
 def test_extract_desktop_tauri_dat(tmp_path):

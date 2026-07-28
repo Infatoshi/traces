@@ -18,7 +18,6 @@ from click.testing import CliRunner
 
 from traces.redact import gitleaks, llm_residue
 
-
 # ---------------------------------------------------------------------------
 # gitleaks layer
 # ---------------------------------------------------------------------------
@@ -129,7 +128,7 @@ def test_privacy_filter_not_imported_at_module_load():
     # do not contain torch/transformers (lazy import lives inside __init__).
     assert "torch" not in pf_mod.__dict__
     assert "transformers" not in pf_mod.__dict__
-    assert getattr(pipeline_mod, "run_redact") is not None
+    assert pipeline_mod.run_redact is not None
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +185,9 @@ def test_llm_residue_pass_no_candidates(tmp_path):
 
 def test_pipeline_runs_gitleaks_when_flagged(tmp_path):
     """End-to-end: pipeline calls run_scan when config.gitleaks is True."""
+    from tests.conftest import make_conversation, make_message, write_jsonl
     from traces.config import RedactorConfig
     from traces.redact import pipeline
-    from tests.conftest import write_jsonl, make_conversation, make_message
 
     in_dir = tmp_path / "raw_extracted"
     out_dir = tmp_path / "redacted"
@@ -214,9 +213,9 @@ def test_pipeline_runs_gitleaks_when_flagged(tmp_path):
 
 def test_pipeline_skips_layers_when_not_flagged(tmp_path):
     """No layers key should appear when no flags are set."""
+    from tests.conftest import make_conversation, make_message, write_jsonl
     from traces.config import RedactorConfig
     from traces.redact import pipeline
-    from tests.conftest import write_jsonl, make_conversation, make_message
 
     in_dir = tmp_path / "raw_extracted"
     out_dir = tmp_path / "redacted"
@@ -237,8 +236,8 @@ def test_pipeline_skips_layers_when_not_flagged(tmp_path):
 
 def test_cli_redact_passes_gitleaks_flag(tmp_path):
     """--gitleaks should flow through to the config the pipeline sees."""
+    from tests.conftest import make_conversation, make_message, write_jsonl
     from traces.cli import cli
-    from tests.conftest import write_jsonl, make_conversation, make_message
 
     raw_dir = tmp_path / "raw"
     write_jsonl(raw_dir / "claude_code.jsonl", [

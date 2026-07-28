@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from traces.sample import sample_conversations
 from tests.conftest import make_conversation, make_message, write_jsonl
+from traces.sample import sample_conversations
 
 
 def test_sample_reproducible_with_seed(tmp_path: Path):

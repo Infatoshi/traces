@@ -128,14 +128,25 @@ def test_extracts_current_codex_shape_observed_in_local_rollouts(tmp_path):
 
     assert [(message["role"], message["content"]) for message in conv["messages"]] == [
         ("user", "hello"),
+        ("assistant", ""),
+        ("tool", ""),
         ("assistant", "done"),
     ]
+    call = conv["messages"][1]["tool_calls"][0]
+    assert call == {
+        "id": "call-1",
+        "name": "exec_command",
+        "input": {},
+        "kind": "function",
+    }
+    result = conv["messages"][2]["tool_result"]
+    assert result["tool_call_id"] == "call-1"
+    assert result["tool"] == "exec_command"
+    assert result["output"] == "ok"
     assert conv["model"] == "gpt-model"
     assert conv["status"] == "completed"
     assert conv["version"] == "0.143.0"
     assert conv["project_path"] == "/work/project"
-    assert conv["tool_call_count"] == 1
-    assert conv["tool_result_count"] == 1
     assert conv["diff_count"] == 1
     assert conv["token_usage"] == {
         "input": 100,

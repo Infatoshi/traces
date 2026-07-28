@@ -1,10 +1,14 @@
 """End-to-end canary: synthetic PII must not survive the full pipeline."""
 from __future__ import annotations
 
-
 from tests.conftest import (
-    CANARY_OPENAI_KEY, CANARY_GITHUB_TOKEN, CANARY_EMAIL,
-    CANARY_HOME_PATH, CANARY_PRIVATE_URL, CANARY_PHONE, CANARY_BEARER,
+    CANARY_BEARER,
+    CANARY_EMAIL,
+    CANARY_GITHUB_TOKEN,
+    CANARY_HOME_PATH,
+    CANARY_OPENAI_KEY,
+    CANARY_PHONE,
+    CANARY_PRIVATE_URL,
 )
 
 ALL_CANARIES = [
@@ -42,10 +46,10 @@ def test_no_canary_survives_export(tmp_path, canary_conversation):
     exp_dir = tmp_path / "export"
     write_jsonl(in_dir / "claude_code.jsonl", [canary_conversation])
 
-    from traces.config import RedactorConfig, ExportConfig
-    from traces.redact.pipeline import run_redact
+    from traces.config import ExportConfig, RedactorConfig
     from traces.export.messages import export_messages
     from traces.export.sharegpt import export_sharegpt
+    from traces.redact.pipeline import run_redact
 
     run_redact(in_dir, red_dir, RedactorConfig(user_name="alexmorgan", home_dir="/Users/alexmorgan"))
     export_messages(red_dir, exp_dir / "messages.jsonl", ExportConfig(variant="messages"))

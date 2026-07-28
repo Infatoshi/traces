@@ -133,10 +133,12 @@ def test_extracts_current_claude_shape_observed_in_local_sessions(tmp_path):
     }
     assert conv["messages"][1]["id"] == "assistant-message-1"
     assert conv["messages"][1]["parent_id"] == "user-1"
-    assert conv["messages"][2]["tool_results"] == [{
+    assert conv["messages"][2]["tool_result"] == {
         "tool_call_id": "tool-1",
+        "tool": "Bash",
         "status": "completed",
-    }]
+        "output": "ok",
+    }
 
 
 def test_skips_current_claude_auxiliary_sidecars(tmp_path):
@@ -182,6 +184,33 @@ def test_keeps_real_conversation_that_contains_ai_title_event(tmp_path):
     conversations = list(ClaudeCodeExtractor().extract(install))
     assert len(conversations) == 1
     assert conversations[0]["messages"][1]["content"] == "real response"
+
+
+def test_keeps_subagent_trace_with_parent_linkage(tmp_path):
+    install = tmp_path / ".claude"
+    session = install / "projects" / "p" / "agent-child.jsonl"
+    write_session_jsonl(session, [
+        {
+            "type": "user",
+            "sessionId": "parent-session",
+            "message": {"content": "delegated task"},
+        },
+        {
+            "type": "assistant",
+            "sessionId": "parent-session",
+            "message": {
+                "model": "claude-model",
+                "content": [{"type": "text", "text": "done"}],
+            },
+        },
+    ])
+
+    conversations = list(ClaudeCodeExtractor().extract(install))
+
+    assert len(conversations) == 1
+    assert conversations[0]["session_id"] == "agent-child"
+    assert conversations[0]["session_kind"] == "subagent"
+    assert conversations[0]["parent_session_id"] == "parent-session"
 
 
 def test_extract_skips_empty_session(tmp_path):

@@ -106,11 +106,11 @@ def flatten_message(msg: dict[str, Any]) -> str:
         parts.append(str(content))
 
     for field_name, tag in KNOWN_FIELDS:
-        if field_name in msg and msg[field_name]:
+        if msg.get(field_name):
             parts.append(_render_known(field_name, tag, msg[field_name]))
 
     # Unknown non-meta fields, sorted by key for determinism.
-    unknown = sorted(k for k in msg.keys() if k not in META_FIELDS and k not in dict(KNOWN_FIELDS))
+    unknown = sorted(k for k in msg if k not in META_FIELDS and k not in dict(KNOWN_FIELDS))
     for k in unknown:
         parts.append(_render_unknown(k, msg[k]))
 

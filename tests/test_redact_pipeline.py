@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
+from tests.conftest import write_jsonl
 from traces.config import RedactorConfig
 from traces.redact.pipeline import run_redact
-from tests.conftest import write_jsonl
 
 
 def test_pipeline_redacts_canary_jsonl(tmp_path, canary_conversation):

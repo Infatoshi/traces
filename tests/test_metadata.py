@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from traces.export.metadata import build_metadata, trace_id
 from tests.conftest import make_conversation, make_message
-
+from traces.export.metadata import build_metadata, trace_id
 
 KEY = "metadata-test-key"
 

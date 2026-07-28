@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
+from tests.conftest import make_conversation, make_message, write_jsonl
 from traces.config import ExportConfig
 from traces.export.sharegpt import export_sharegpt
-from tests.conftest import make_conversation, make_message, write_jsonl
 
 
 def test_two_turn_conversation_yields_two_pairs(tmp_path):

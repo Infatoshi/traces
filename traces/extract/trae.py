@@ -9,8 +9,8 @@ import json
 import os
 import platform
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -143,7 +143,7 @@ def extract_from_jsonl(jsonl_file, source) -> list[Conversation]:
                 **metadata
             })
 
-    except Exception as e:  # noqa: BLE001 - upstream prints but continues
+    except Exception as e:
         print(f"Error processing {jsonl_file}: {e}")
 
     return conversations
@@ -176,15 +176,15 @@ def extract_from_sqlite(db_file, source) -> list[Conversation]:
                         conv = extract_conversation_from_data(data, source, str(db_file))
                         if conv:
                             conversations.append(conv)
-                    except Exception:  # noqa: BLE001 - upstream swallows per-row errors
+                    except Exception:
                         continue
 
-        except Exception:  # noqa: BLE001 - upstream swallows schema errors
+        except Exception:
             pass
 
         conn.close()
 
-    except Exception:  # noqa: BLE001 - upstream swallows DB-level errors
+    except Exception:
         pass
 
     return conversations

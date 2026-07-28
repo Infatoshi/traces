@@ -17,13 +17,13 @@ def build(ctx: RuleContext) -> list[Rule]:
     return [
         (
             "opencode_share_url",
-            re.compile(r"\bhttps?://(?:www\.)?opncd\.ai/share/[^\s'\"<>`)}\]]+", re.I),
+            re.compile(r"\bhttps?://(?:www\.)?opncd\.ai/share/[^\s'\"<>`)}\]]+", re.IGNORECASE),
             "[PRIVATE_SHARE_URL]",
         ),
         (
             "private_url",
-            re.compile(r"\bhttps?://(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+)[^\s'\"<>`]*", re.I),
+            re.compile(r"\bhttps?://(?:localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[0-1])\.\d+\.\d+)[^\s'\"<>`]*", re.IGNORECASE),
             "[PRIVATE_URL]",
         ),
-        ("url", re.compile(r"\bhttps?://[^\s'\"<>`)}\]]+", re.I), None),
+        ("url", re.compile(r"\bhttps?://[^\s'\"<>`)}\]]+", re.IGNORECASE), None),
     ]

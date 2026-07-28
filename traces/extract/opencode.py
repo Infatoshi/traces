@@ -17,9 +17,11 @@ from __future__ import annotations
 import json
 import os
 import platform
+import sqlite3
 import struct
+from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -105,14 +107,14 @@ def read_tauri_store(dat_file):
                 value_bytes = data[offset:offset+value_len]
                 value = json.loads(value_bytes.decode('utf-8'))
                 store[key] = value
-            except Exception:  # noqa: BLE001 - upstream swallows per-entry errors
+            except Exception:
                 pass
 
             offset += value_len
 
         return store
 
-    except Exception as e:  # noqa: BLE001 - upstream prints but returns {}
+    except Exception as e:
         print(f"Error reading Tauri store {dat_file}: {e}")
         return {}
 
@@ -286,7 +288,7 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
                                     if reasoning_text:
                                         reasoning_parts.append(reasoning_text)
 
-                            except Exception as e:  # noqa: BLE001 - upstream swallows per-part errors
+                            except Exception as e:
                                 print(f"    Error reading part {part_file}: {e}")
                                 continue
 
@@ -301,7 +303,7 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
 
                     messages.append(message)
 
-                except Exception as e:  # noqa: BLE001 - upstream swallows per-msg errors
+                except Exception as e:
                     print(f"    Error reading message {msg_file}: {e}")
                     continue
 
@@ -344,10 +346,238 @@ def extract_cli_conversations(storage_dir: Path) -> list[Conversation]:
 
             conversations.append(conversation)
 
-        except Exception as e:  # noqa: BLE001 - upstream swallows per-session errors
+        except Exception as e:
             print(f"  Error processing session {session_dir_path}: {e}")
             continue
 
+    return conversations
+
+
+def extract_sqlite_conversations(db_path: Path) -> list[Conversation]:
+    """Extract current OpenCode CLI sessions from its read-only SQLite store."""
+    conversations: list[Conversation] = []
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+    except sqlite3.Error as exc:
+        print(f"Error opening OpenCode database {db_path}: {exc}")
+        return conversations
+
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if not {"session", "message", "part"} <= tables:
+            return conversations
+
+        messages_by_session: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in connection.execute(
+            "SELECT id, session_id, time_created, time_updated, data "
+            "FROM message ORDER BY time_created, id"
+        ):
+            messages_by_session[row["session_id"]].append(row)
+
+        parts_by_message: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in connection.execute(
+            "SELECT id, message_id, session_id, time_created, time_updated, data "
+            "FROM part ORDER BY time_created, id"
+        ):
+            parts_by_message[row["message_id"]].append(row)
+
+        session_rows = connection.execute(
+            "SELECT * FROM session ORDER BY time_created, id"
+        ).fetchall()
+        for session_row in session_rows:
+            session_columns = set(session_row.keys())
+
+            def session_value(column: str) -> object:
+                return session_row[column] if column in session_columns else None
+
+            session_id = str(session_value("id"))
+            normalized_messages: list[dict] = []
+            finish_reasons: list[str] = []
+
+            for message_row in messages_by_session.get(session_id, []):
+                try:
+                    message_data = json.loads(message_row["data"])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                role = message_data.get("role", "assistant")
+                model_data = (
+                    message_data.get("model")
+                    if isinstance(message_data.get("model"), dict)
+                    else {}
+                )
+                model = message_data.get("modelID") or model_data.get("modelID")
+                provider = (
+                    message_data.get("providerID")
+                    or model_data.get("providerID")
+                )
+                content_parts: list[str] = []
+
+                def append_segment(
+                    segment_role: str,
+                    content: object,
+                    timestamp: object,
+                    **fields: object,
+                ) -> dict:
+                    segment = {
+                        "role": segment_role,
+                        "content": content,
+                        "timestamp": timestamp,
+                        **fields,
+                    }
+                    if segment_role == "assistant" and model:
+                        segment["model"] = model
+                    if segment_role == "assistant" and provider:
+                        segment["provider"] = provider
+                    if segment_role == "assistant" and message_data.get("agent"):
+                        segment["agent"] = message_data["agent"]
+                    normalized_messages.append(segment)
+                    return segment
+
+                def flush_content(timestamp: object) -> None:
+                    if content_parts:
+                        append_segment(role, "\n".join(content_parts), timestamp)
+                        content_parts.clear()
+
+                for part_row in parts_by_message.get(message_row["id"], []):
+                    try:
+                        part = json.loads(part_row["data"])
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    part_type = part.get("type")
+                    if part_type == "text" and isinstance(part.get("text"), str):
+                        content_parts.append(part["text"])
+                    elif part_type == "reasoning" and isinstance(part.get("text"), str):
+                        flush_content(part_row["time_created"])
+                        append_segment(
+                            "assistant",
+                            part["text"],
+                            part_row["time_created"],
+                            phase="reasoning",
+                        )
+                    elif part_type == "tool":
+                        flush_content(part_row["time_created"])
+                        state = (
+                            part.get("state")
+                            if isinstance(part.get("state"), dict)
+                            else {}
+                        )
+                        call_id = part.get("callID") or part.get("id")
+                        tool_name = part.get("tool") or part.get("name")
+                        call = {
+                            "id": call_id,
+                            "name": tool_name,
+                            "input": state.get("input", {}),
+                            "kind": "function",
+                        }
+                        append_segment(
+                            "assistant",
+                            "",
+                            part_row["time_created"],
+                            tool_calls=[call],
+                        )
+                        tool_status = state.get("status")
+                        if tool_status in {"completed", "error"}:
+                            result = {
+                                "tool_call_id": call_id,
+                                "tool": tool_name,
+                                "status": tool_status,
+                                "output": (
+                                    state.get("output")
+                                    if tool_status == "completed"
+                                    else state.get("error", state.get("output"))
+                                ),
+                            }
+                            if isinstance(state.get("metadata"), dict):
+                                result["metadata"] = state["metadata"]
+                            append_segment(
+                                "tool",
+                                "",
+                                part_row["time_updated"],
+                                tool_result=result,
+                            )
+                    elif part_type == "patch" and isinstance(part.get("files"), list):
+                        flush_content(part_row["time_created"])
+                        files = [
+                            item
+                            for item in part["files"]
+                            if isinstance(item, (str, dict))
+                        ]
+                        if files:
+                            artifact: dict[str, object] = {"files": files}
+                            if isinstance(part.get("hash"), str):
+                                artifact["hash"] = part["hash"]
+                            if normalized_messages:
+                                normalized_messages[-1].setdefault("diffs", []).append(
+                                    artifact
+                                )
+                            else:
+                                append_segment(
+                                    "assistant",
+                                    "",
+                                    part_row["time_created"],
+                                    diffs=[artifact],
+                                )
+                    elif part_type == "step-finish":
+                        flush_content(part_row["time_created"])
+                        reason = part.get("reason")
+                        if isinstance(reason, str):
+                            finish_reasons.append(reason)
+                            for segment in reversed(normalized_messages):
+                                if segment.get("role") == "assistant":
+                                    segment["finish_reason"] = reason
+                                    break
+
+                flush_content(message_row["time_updated"])
+
+            if not normalized_messages:
+                continue
+
+            conversation: Conversation = {
+                "messages": normalized_messages,
+                "source": "opencode-cli",
+                "session_id": session_id,
+                "project_id": session_value("project_id"),
+                "project_path": session_value("directory"),
+                "created_at": session_value("time_created"),
+                "updated_at": session_value("time_updated"),
+                "version": session_value("version"),
+                "source_file": str(db_path),
+            }
+            if session_value("parent_id"):
+                conversation["parent_session_id"] = session_value("parent_id")
+                conversation["session_kind"] = "subagent"
+            if session_value("model"):
+                conversation["model"] = session_value("model")
+            if finish_reasons and finish_reasons[-1] == "stop":
+                conversation["status"] = "completed"
+            elif finish_reasons and finish_reasons[-1] == "length":
+                conversation["status"] = "truncated"
+
+            token_fields = {
+                "input": "tokens_input",
+                "output": "tokens_output",
+                "reasoning": "tokens_reasoning",
+                "cached_input": "tokens_cache_read",
+                "cache_write": "tokens_cache_write",
+            }
+            token_usage = {
+                normalized: session_row[column]
+                for normalized, column in token_fields.items()
+                if column in session_columns and session_row[column]
+            }
+            if token_usage:
+                conversation["token_usage"] = token_usage
+            conversations.append(conversation)
+    except sqlite3.Error as exc:
+        print(f"Error reading OpenCode database {db_path}: {exc}")
+    finally:
+        connection.close()
     return conversations
 
 
@@ -395,7 +625,7 @@ def extract_desktop_conversations(desktop_dir: Path) -> list[Conversation]:
 
                     conversations.append(conversation)
 
-                except Exception:  # noqa: BLE001 - upstream swallows per-entry errors
+                except Exception:
                     continue
 
     return conversations
@@ -409,16 +639,24 @@ def extract_opencode_conversations(installation: Path) -> list[Conversation]:
     """
     conversations: list[Conversation] = []
 
+    database = installation / "opencode.db"
+    if database.is_file():
+        conversations.extend(extract_sqlite_conversations(database))
+
     if (installation / 'storage').exists():
         conversations.extend(extract_cli_conversations(installation))
 
     if list(installation.rglob('*.dat')):
         conversations.extend(extract_desktop_conversations(installation))
 
+    deduplicated: dict[tuple[str, object], Conversation] = {}
     for conv in conversations:
         conv['installation'] = str(installation)
+        key = (str(conv.get("source")), conv.get("session_id") or id(conv))
+        if key not in deduplicated:
+            deduplicated[key] = conv
 
-    return conversations
+    return list(deduplicated.values())
 
 
 class OpenCodeExtractor:

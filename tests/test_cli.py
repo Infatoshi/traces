@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from tests.conftest import make_conversation, make_message, write_jsonl
 from traces.cli import cli
-from tests.conftest import write_jsonl, make_conversation, make_message
 
 
 def test_run_chains_all_three_stages(tmp_path, monkeypatch):
@@ -38,6 +38,69 @@ def test_run_chains_all_three_stages(tmp_path, monkeypatch):
 
     assert (out / "export" / "messages.jsonl").exists()
     assert (out / "export" / "sharegpt.jsonl").exists()
+
+
+def test_export_all_writes_native_and_assistant_step_variants(tmp_path):
+    input_dir = tmp_path / "redacted"
+    write_jsonl(input_dir / "agent.jsonl", [{
+        "source": "agent",
+        "session_id": "s1",
+        "messages": [
+            {"role": "user", "content": "run"},
+            {
+                "role": "assistant",
+                "content": "done",
+                "tool_calls": [{
+                    "id": "c1", "name": "shell", "input": {"cmd": "true"}
+                }],
+                "tool_results": [{
+                    "tool_call_id": "c1", "output": "ok"
+                }],
+            },
+        ],
+    }])
+    output_dir = tmp_path / "export"
+
+    result = CliRunner().invoke(cli, [
+        "export",
+        "--in", str(input_dir),
+        "--out", str(output_dir),
+        "--variant", "all",
+        "--require-complete-tools",
+        "--require-final-assistant",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert {path.name for path in output_dir.glob("*.jsonl")} == {
+        "messages.jsonl",
+        "sharegpt.jsonl",
+        "execution.jsonl",
+        "assistant_steps.jsonl",
+    }
+
+
+def test_export_steps_includes_required_execution_backing(tmp_path):
+    input_dir = tmp_path / "redacted"
+    write_jsonl(input_dir / "agent.jsonl", [{
+        "source": "agent",
+        "session_id": "s1",
+        "messages": [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "answer"},
+        ],
+    }])
+    output_dir = tmp_path / "export"
+
+    result = CliRunner().invoke(cli, [
+        "export", "--in", str(input_dir), "--out", str(output_dir),
+        "--variant", "steps",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert {path.name for path in output_dir.glob("*.jsonl")} == {
+        "execution.jsonl",
+        "assistant_steps.jsonl",
+    }
 
 
 def test_run_command_writes_manifest(tmp_path, monkeypatch):

@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 import os
 import platform
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -94,10 +94,10 @@ def extract_gemini_session(session_file: Path) -> Conversation | None:
                 if 'model' in msg:
                     normalized_msg['model'] = msg['model']
 
-                if 'thoughts' in msg and msg['thoughts']:
+                if msg.get('thoughts'):
                     normalized_msg['thoughts'] = msg['thoughts']
 
-                if 'tokens' in msg and msg['tokens']:
+                if msg.get('tokens'):
                     normalized_msg['tokens'] = msg['tokens']
                     for source_key, target_key in (
                         ('input', 'input'),
@@ -128,6 +128,7 @@ def extract_gemini_session(session_file: Path) -> Conversation | None:
                                 'tool_call_id': call.get('id'),
                                 'tool': call.get('name'),
                                 'status': call.get('status'),
+                                'output': call.get('result'),
                             })
                     if tool_calls:
                         normalized_msg['tool_calls'] = tool_calls
@@ -159,7 +160,7 @@ def extract_gemini_session(session_file: Path) -> Conversation | None:
 
         return conv
 
-    except (json.JSONDecodeError, KeyError, Exception):  # noqa: BLE001 - upstream swallows errors
+    except (json.JSONDecodeError, KeyError, Exception):
         return None
 
 

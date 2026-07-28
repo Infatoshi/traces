@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from tests.conftest import make_conversation, make_message
 from traces.config import ExportConfig
 from traces.export.filters import filter_reason
-from tests.conftest import make_conversation, make_message
 
 
 def rich_conversation() -> dict:

@@ -22,7 +22,7 @@ class RedactorConfig:
 
 @dataclass
 class ExportConfig:
-    variant: str = "both"               # "messages" | "sharegpt" | "both"
+    variant: str = "both"
     min_turns: int | None = None
     max_turns: int | None = None
     min_assistant_chars: int | None = None
@@ -37,5 +37,7 @@ class ExportConfig:
     until: str | None = None
     require_tools: bool = False
     require_diffs: bool = False
+    require_complete_tools: bool = False
+    require_final_assistant: bool = False
     dedup: bool = False
     metadata_key: str | None = None

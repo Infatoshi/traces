@@ -79,7 +79,7 @@ def build(ctx: RuleContext) -> list[Rule]:
         ),
         (
             "database_url",
-            re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s'\"<>`]+", re.I),
+            re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s'\"<>`]+", re.IGNORECASE),
             "[SECRET:DATABASE_URL]",
         ),
         (

@@ -14,7 +14,7 @@ def upload_variant(
     private: bool = False,
     token: str | None = None,
 ) -> str:
-    """Upload messages.jsonl and/or sharegpt.jsonl + dataset card to HF Hub.
+    """Upload selected export variants and a dataset card to HF Hub.
 
     Returns the Hub URL. Requires the `publish` extra: pip install -e .[publish]
     """
@@ -26,11 +26,20 @@ def upload_variant(
     api = HfApi(token=token)
     create_repo(repo_id, repo_type="dataset", private=private, exist_ok=True, token=token)
 
-    files: list[Path] = []
-    if variant in ("messages", "both"):
-        files.append(export_dir / "messages.jsonl")
-    if variant in ("sharegpt", "both"):
-        files.append(export_dir / "sharegpt.jsonl")
+    variant_files = {
+        "messages": ["messages.jsonl"],
+        "sharegpt": ["sharegpt.jsonl"],
+        "execution": ["execution.jsonl"],
+        "steps": ["execution.jsonl", "assistant_steps.jsonl"],
+        "both": ["messages.jsonl", "sharegpt.jsonl"],
+        "all": [
+            "messages.jsonl",
+            "sharegpt.jsonl",
+            "execution.jsonl",
+            "assistant_steps.jsonl",
+        ],
+    }
+    files = [export_dir / name for name in variant_files[variant]]
     for f in files:
         if not f.exists():
             raise FileNotFoundError(f)

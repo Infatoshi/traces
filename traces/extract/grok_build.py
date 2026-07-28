@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import unquote
 
 from traces.extract.base import Conversation, Message
@@ -42,9 +43,7 @@ def _content_to_text(content: Any) -> str:
         parts: list[str] = []
         for item in content:
             if isinstance(item, dict):
-                if item.get("type") == "text" or "text" in item:
-                    parts.append(str(item.get("text") or ""))
-                elif item.get("type") == "summary_text":
+                if item.get("type") == "text" or "text" in item or item.get("type") == "summary_text":
                     parts.append(str(item.get("text") or ""))
                 else:
                     parts.append(json.dumps(item, ensure_ascii=False))
@@ -83,7 +82,7 @@ def _tool_calls_to_uses(tool_calls: Any) -> list[dict[str, Any]]:
             try:
                 parsed = json.loads(raw_args)
             except json.JSONDecodeError:
-                parsed = {"_raw": raw_args}
+                parsed = raw_args
         uses.append({
             "id": tc.get("id"),
             "name": name,
@@ -144,6 +143,7 @@ def extract_grok_session(session_dir: Path) -> Conversation | None:
                 msg = {
                     "role": "assistant",
                     "content": f"<reasoning>\n{text}\n</reasoning>",
+                    "phase": "reasoning",
                 }
                 if obj.get("model_id"):
                     msg["model"] = str(obj["model_id"])
@@ -152,10 +152,9 @@ def extract_grok_session(session_dir: Path) -> Conversation | None:
                 text = _content_to_text(obj.get("content"))
                 msg = {"role": "tool", "content": text}
                 if obj.get("tool_call_id"):
-                    msg["tool_use"] = {
-                        "id": obj["tool_call_id"],
-                        "type": "tool_result",
-                        "text": text,
+                    msg["tool_result"] = {
+                        "tool_call_id": obj["tool_call_id"],
+                        "output": obj.get("content"),
                     }
                 messages.append(msg)
             else:

@@ -23,7 +23,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_BASE_URL = "http://localhost:8000"
 
 DEFAULT_CANDIDATE_PATTERNS = [

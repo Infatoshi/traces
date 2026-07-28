@@ -108,6 +108,10 @@ def test_extract_tool_calls_and_results(tmp_path):
     assert conv["messages"][1]["tool_uses"][0]["input"] == {"command": "ls"}
     assert conv["messages"][2]["role"] == "tool"
     assert conv["messages"][2]["content"] == "file.txt"
+    assert conv["messages"][2]["tool_result"] == {
+        "tool_call_id": "call-1",
+        "output": "file.txt",
+    }
 
 
 def test_extract_reasoning_summary(tmp_path):
@@ -132,6 +136,7 @@ def test_extract_reasoning_summary(tmp_path):
     assert conv["messages"][1]["role"] == "assistant"
     assert "planning steps" in conv["messages"][1]["content"]
     assert "<reasoning>" in conv["messages"][1]["content"]
+    assert conv["messages"][1]["phase"] == "reasoning"
 
 
 def test_extract_empty_install(tmp_path):

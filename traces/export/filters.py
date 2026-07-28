@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fnmatch import fnmatchcase
 
 from traces.config import ExportConfig
+from traces.execution import execution_summary
 from traces.export.metadata import build_metadata
 
 
@@ -92,6 +93,12 @@ def filter_reason(conv: dict, config: ExportConfig) -> str | None:
         return "tools_required"
     if config.require_diffs and counts["diffs"] == 0:
         return "diffs_required"
+    if config.require_complete_tools or config.require_final_assistant:
+        execution = execution_summary(conv)
+        if config.require_complete_tools and not execution["tools_complete"]:
+            return "complete_tools_required"
+        if config.require_final_assistant and not execution["final_assistant"]:
+            return "final_assistant_required"
     return None
 
 

@@ -15,7 +15,6 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-
 SCHEMA_VERSION = "1.0"
 _PROCESS_KEY = (
     os.environ.get("TRACES_METADATA_KEY") or secrets.token_hex(32)

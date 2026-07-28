@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 import os
 import platform
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -61,17 +61,18 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                 jsonl_files.extend(proj.glob("*.jsonl"))
     else:
         jsonl_files = list(project_dir.glob("*.jsonl"))
-    jsonl_files = [f for f in jsonl_files if not f.name.startswith("agent-")]
-
     for jsonl_file in jsonl_files:
         try:
             messages: list[dict] = []
             session_id = jsonl_file.stem
+            is_subagent = jsonl_file.name.startswith("agent-")
+            parent_session_id: str | None = None
             project_path: str | None = None
             project_name = jsonl_file.parent.name if jsonl_file.parent.name != "projects" else None
             timestamps: list[str] = []
             version: str | None = None
             record_types: set[str] = set()
+            tool_names: dict[str, str] = {}
             token_usage = {
                 "input": 0,
                 "output": 0,
@@ -96,6 +97,12 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                         timestamps.append(timestamp)
                     if isinstance(obj.get("version"), str):
                         version = obj["version"]
+                    if (
+                        is_subagent
+                        and isinstance(obj.get("sessionId"), str)
+                        and obj["sessionId"] != session_id
+                    ):
+                        parent_session_id = obj["sessionId"]
                     if msg_type == "user":
                         message = obj.get("message", {})
                         content = message.get("content", "")
@@ -108,10 +115,17 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                                 if item.get("type") == "text":
                                     text_parts.append(str(item.get("text", "")))
                                 elif item.get("type") == "tool_result":
-                                    wrapped_results.append({
+                                    result = {
                                         "tool_call_id": item.get("tool_use_id"),
                                         "status": "error" if item.get("is_error") else "completed",
-                                    })
+                                        "output": item.get("content", ""),
+                                    }
+                                    tool_call_id = item.get("tool_use_id")
+                                    if isinstance(tool_call_id, str) and tool_call_id in tool_names:
+                                        result["tool"] = tool_names[tool_call_id]
+                                    if isinstance(obj.get("toolUseResult"), dict):
+                                        result["details"] = obj["toolUseResult"]
+                                    wrapped_results.append(result)
                             content = "\n".join(text_parts)
                         if content:
                             msg: dict = {"role": "user", "content": content,
@@ -124,12 +138,13 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                                 msg["tool_use"] = obj["toolUse"]
                             messages.append(msg)
                         if wrapped_results:
-                            messages.append({
-                                "role": "tool",
-                                "content": "",
-                                "timestamp": obj.get("timestamp"),
-                                "tool_results": wrapped_results,
-                            })
+                            for result in wrapped_results:
+                                messages.append({
+                                    "role": "tool",
+                                    "content": "",
+                                    "timestamp": obj.get("timestamp"),
+                                    "tool_result": result,
+                                })
                         if "cwd" in obj:
                             project_path = obj["cwd"]
 
@@ -145,6 +160,8 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                                         text_parts.append(item.get("text", ""))
                                     elif item.get("type") == "tool_use":
                                         tool_uses.append(item)
+                                        if isinstance(item.get("id"), str) and isinstance(item.get("name"), str):
+                                            tool_names[item["id"]] = item["name"]
                         elif isinstance(content, str):
                             text_parts.append(content)
                         full_text = "\n".join(text_parts)
@@ -204,13 +221,17 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
                     conversation["updated_at"] = max(timestamps)
                 if version:
                     conversation["version"] = version
+                if is_subagent:
+                    conversation["session_kind"] = "subagent"
+                if parent_session_id:
+                    conversation["parent_session_id"] = parent_session_id
                 nonzero_usage = {
                     key: value for key, value in token_usage.items() if value
                 }
                 if nonzero_usage:
                     conversation["token_usage"] = nonzero_usage
                 conversations.append(conversation)
-        except Exception as e:  # noqa: BLE001 - upstream swallows per-file errors
+        except Exception as e:
             print(f"Error processing {jsonl_file}: {e}")
             continue
 

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from traces.config import ExportConfig
 from traces.export.filters import dedup_key, filter_reason

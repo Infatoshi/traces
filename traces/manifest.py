@@ -34,7 +34,12 @@ def write_manifest(
         }
     files: dict[str, Any] = {}
     export_dir = out_root / "export"
-    for name in ("messages.jsonl", "sharegpt.jsonl"):
+    for name in (
+        "messages.jsonl",
+        "sharegpt.jsonl",
+        "execution.jsonl",
+        "assistant_steps.jsonl",
+    ):
         p = export_dir / name
         if p.exists():
             files[f"export/{name}"] = file_hashes(p)
@@ -50,6 +55,23 @@ def write_manifest(
         export_summary["messages_by_source"] = messages_by_source
     if sharegpt_by_source:
         export_summary["sharegpt_pairs_by_source"] = sharegpt_by_source
+    if "execution" in export_summaries:
+        export_summary["execution_rows"] = export_summaries["execution"].get(
+            "rows", 0
+        )
+        export_summary["execution_by_source"] = export_summaries[
+            "execution"
+        ].get("by_source", {})
+    if "steps" in export_summaries:
+        export_summary["assistant_step_rows"] = export_summaries["steps"].get(
+            "rows", 0
+        )
+        export_summary["assistant_targets"] = export_summaries["steps"].get(
+            "targets", 0
+        )
+        export_summary["assistant_steps_by_source"] = export_summaries[
+            "steps"
+        ].get("by_source", {})
 
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),

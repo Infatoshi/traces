@@ -1,15 +1,16 @@
 """Shared types for extractors."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 
 class Message(TypedDict, total=False):
     id: str | None
     parent_id: str | None
     role: str            # "user" | "assistant" | "system" | "tool"
-    content: str
+    content: Any
     timestamp: str | None
     model: str | None
     code_context: list[dict[str, Any]]
@@ -24,6 +25,9 @@ class Message(TypedDict, total=False):
     diffs: list[dict[str, Any]]
     edits: list[dict[str, Any]]
     suggested_code_blocks: list[dict[str, Any]]
+    phase: str
+    reasoning: str
+    finish_reason: str
 
 
 class Conversation(TypedDict, total=False):
@@ -37,6 +41,7 @@ class Conversation(TypedDict, total=False):
     session_kind: str | None
     sandbox_profile: str | None
     session_id: str | None
+    parent_session_id: str | None
     project_path: str | None
     project_name: str | None
     project_id: str | None

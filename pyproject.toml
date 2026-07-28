@@ -3,22 +3,69 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "traces"
-version = "0.1.0"
-description = "Extract, redact, and export AI coding-agent traces for DistillKit."
+name = "coding-agent-traces"
+version = "0.2.0"
+description = "Extract, redact, and export AI coding-agent sessions into privacy-safe training JSONL."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [{ name = "Infatoshi" }]
+keywords = [
+  "coding-agents",
+  "traces",
+  "redaction",
+  "distillation",
+  "fine-tuning",
+  "claude-code",
+  "codex",
+  "cursor",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development",
+]
 dependencies = ["click>=8.1"]
 
 [project.optional-dependencies]
 privacy-filter = ["transformers>=4.40", "torch>=2.1"]
 gitleaks = []  # gitleaks is an external binary; no python deps
 publish = ["huggingface_hub>=0.20"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/Infatoshi/traces"
+Repository = "https://github.com/Infatoshi/traces"
+Issues = "https://github.com/Infatoshi/traces/issues"
 
 [project.scripts]
 traces = "traces.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["traces*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Baseline for vendored extractors/redaction: prefer green CI over mass rewrites.
+ignore = [
+  "B023",    # loop variable binding in nested functions (fixture patterns)
+  "BLE001",  # broad except in optional privacy/gitleaks layers
+  "PLW1510", # subprocess run without check=
+  "RUF015",  # next(iter(...)) style nits
+  "S110",    # try/except/pass in format probes
+  "S112",    # try/except/continue in format probes
+  "SIM102",  # collapsible if
+  "SIM103",  # needless bool
+  "UP028",   # yield-in-for modernization
+]

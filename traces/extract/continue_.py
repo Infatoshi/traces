@@ -5,8 +5,8 @@ Refactored to the Extractor protocol; discovery + parsing logic preserved.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from traces.extract.base import Conversation
 
@@ -73,11 +73,11 @@ def extract_continue_sessions(install_dir: Path) -> list[Conversation]:
                     message['tool_calls'] = msg['toolCalls']
 
                 # Add reasoning
-                if 'reasoning' in item and item['reasoning']:
+                if item.get('reasoning'):
                     message['reasoning'] = item['reasoning'].get('text', '')
 
                 # Add context items
-                if 'contextItems' in item and item['contextItems']:
+                if item.get('contextItems'):
                     message['context_items'] = item['contextItems']
 
                 # Add tool results
@@ -106,7 +106,7 @@ def extract_continue_sessions(install_dir: Path) -> list[Conversation]:
                     'installation': str(install_dir),
                 })
 
-        except Exception as e:  # noqa: BLE001 - upstream swallows per-file errors
+        except Exception as e:
             print(f"Error processing {session_file}: {e}")
             continue
 
