@@ -79,3 +79,21 @@ hf upload YOUR_HF_USER/your-dataset \
 
 Use the same `TRACES_METADATA_KEY` whenever you need stable opaque trace/project
 IDs across re-runs. Store that key outside the repo.
+
+## 5. Appending to an existing dataset
+
+`traces publish` replaces the files on the Hub. Local agent stores get pruned
+over time, so a fresh extract is not a superset of what was published. Use
+`traces sync --publish` (see AGENTS.md), or by hand:
+
+```bash
+uv run --extra publish traces pull-published --repo YOUR_HF_USER/your-dataset --out published
+uv run traces merge --out merged export published      # newest first
+uv run traces redact --export-rows --in merged --out rr
+uv run traces clean --in rr --out final
+```
+
+Merging is by `metadata.trace_id`, so every export must use the same
+`TRACES_METADATA_KEY`. Zero ID overlap between a fresh export and the published
+rows means the key differs (or was unset, which falls back to a random
+per-process key) and ID-based merging will duplicate traces.

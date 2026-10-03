@@ -22,6 +22,24 @@ def render_card(manifest: dict, repo_id: str, license_name: str = "mit") -> str:
     total_executions = export_summary.get("execution_rows", 0)
     total_step_rows = export_summary.get("assistant_step_rows", 0)
     total_targets = export_summary.get("assistant_targets", 0)
+    tokens = export_summary.get("tokens") or {}
+    token_block = ""
+    if tokens:
+        rows = "\n".join(
+            f"| {name} | {v['traces']:,.0f} | {v['tokens'] / 1e9:.3f} | {v['assistant_tokens'] / 1e9:.3f} |"
+            for name, v in list(tokens.get("by_model", {}).items())[:15]
+        )
+        token_block = f"""
+## Tokens
+
+{tokens['tokens'] / 1e9:.2f}B tokens ({tokens.get('encoding', '')}) across every message string;
+{tokens['assistant_tokens'] / 1e9:.2f}B of them model-written. By model (a trace's tokens are split
+evenly across the models it lists):
+
+| Model | Traces | Tokens (B) | Model-written (B) |
+|---|---:|---:|---:|
+{rows}
+"""
     return f"""---
 license: {license_name}
 task_categories:
@@ -60,7 +78,7 @@ All variants include privacy-safe metadata schema
 **Totals:** {total_msgs} conversations / {total_pairs} instruction pairs /
 {total_executions} native executions / {total_step_rows} staircase rows /
 {total_targets} assistant targets.
-
+{token_block}
 ## Redaction
 
 All traces were processed through the `traces` redaction pipeline:

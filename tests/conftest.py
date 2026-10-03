@@ -75,3 +75,14 @@ def canary_conversation() -> dict[str, Any]:
 @pytest.fixture
 def canary_jsonl(tmp_path, canary_conversation) -> Path:
     return write_jsonl(tmp_path / "raw_extracted" / "claude_code.jsonl", [canary_conversation])
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_config(monkeypatch, tmp_path_factory):
+    """Tests never read the developer's traces.local.toml or ~/.config/traces."""
+    from traces import settings
+
+    missing = tmp_path_factory.mktemp("no-config") / "absent.toml"
+    monkeypatch.setattr(settings, "REPO_CONFIG", missing)
+    monkeypatch.setattr(settings, "USER_CONFIG", missing)
+    monkeypatch.delenv("TRACES_METADATA_KEY", raising=False)

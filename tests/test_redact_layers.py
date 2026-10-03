@@ -249,7 +249,7 @@ def test_cli_redact_passes_gitleaks_flag(tmp_path):
 
     captured = {}
 
-    def _fake_run_redact(in_dir, out_dir, config):
+    def _fake_run_redact(in_dir, out_dir, config, jobs=1):
         captured["config"] = config
         return {"counts": {}, "layers": {}, "per_source": {}, "config": {}}
 

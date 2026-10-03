@@ -5,10 +5,14 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from traces.fastmatch import Prefilter
+from traces.parallel import iter_range, line_ranges
 from traces.redact.rules import UPSTREAM_ORDER, RuleContext, identifiers, paths, secrets, urls
 
 _FIXED_PLACEHOLDER_HEADS = {
@@ -65,12 +69,25 @@ def _detection_patterns() -> list[tuple[str, re.Pattern]]:
     return patterns
 
 
-def _matched_category(value: str, patterns: list[tuple[str, re.Pattern]]) -> str | None:
+@lru_cache(maxsize=1)
+def _detector() -> tuple[list[tuple[str, re.Pattern]], Prefilter]:
+    patterns = _detection_patterns()
+    return patterns, Prefilter([pattern for _category, pattern in patterns])
+
+
+def _matched_category(
+    value: str,
+    patterns: list[tuple[str, re.Pattern]],
+    prefilter: Prefilter | None = None,
+) -> str | None:
     # Keep an excluded delimiter in place so ``TOKEN=[PRIVATE_TERM]$NEXT``
     # cannot collapse into a newly valid assignment, while paths containing a
     # placeholder cannot become newly valid home paths during verification.
     value = _PLACEHOLDER_RE.sub(lambda _match: "\\", value)
-    for category, pattern in patterns:
+    candidates = prefilter.candidates(value) if prefilter is not None else None
+    for index, (category, pattern) in enumerate(patterns):
+        if candidates is not None and index not in candidates:
+            continue
         for match in pattern.finditer(value):
             if (
                 category == "email"
@@ -101,67 +118,109 @@ def _iter_strings(value: Any, path: str = "$") -> Iterator[tuple[str, str]]:
 
 
 def _row_finding(
-    line: str, patterns: list[tuple[str, re.Pattern]]
+    line: str | bytes,
+    patterns: list[tuple[str, re.Pattern]],
+    prefilter: Prefilter | None = None,
 ) -> tuple[str, str] | None:
     try:
         row = json.loads(line)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return "invalid_json", "$"
     for json_path, value in _iter_strings(row):
-        category = _matched_category(value, patterns)
+        category = _matched_category(value, patterns, prefilter)
         if category:
             return category, json_path
     return None
 
 
-def scan(root: Path) -> ScanReport:
-    patterns = _detection_patterns()
+def _scan_range(task: tuple[str, int, int]) -> tuple[list[tuple[int, str, str]], int]:
+    path, start, end = task
+    patterns, prefilter = _detector()
+    findings: list[tuple[int, str, str]] = []
+    lines = 0
+    for lines, line in enumerate(iter_range(Path(path), start, end), start=1):
+        finding = _row_finding(line, patterns, prefilter)
+        if finding:
+            findings.append((lines, *finding))
+    return findings, lines
+
+
+def _clean_range(task: tuple[str, int, int, str]) -> dict[str, Any]:
+    path, start, end, part = task
+    patterns, prefilter = _detector()
+    kept = 0
+    dropped: Counter[str] = Counter()
+    with open(part, "wb") as target:
+        for line in iter_range(Path(path), start, end):
+            finding = _row_finding(line, patterns, prefilter)
+            if finding:
+                dropped[finding[0]] += 1
+                continue
+            target.write(line)
+            kept += 1
+    return {"kept": kept, "dropped": dict(dropped)}
+
+
+def _run(fn, tasks: list, jobs: int) -> list:
+    if jobs <= 1 or len(tasks) <= 1:
+        return [fn(task) for task in tasks]
+    with ProcessPoolExecutor(min(jobs, len(tasks))) as pool:
+        return list(pool.map(fn, tasks))
+
+
+def scan(root: Path, jobs: int = 1) -> ScanReport:
+    """Report rows that still match a redaction rule. ``jobs`` > 1 uses processes."""
+    files = sorted(root.rglob("*.jsonl"))
+    tasks = [(str(path), start, end) for path in files for start, end in line_ranges(path)]
     findings: list[Finding] = []
-    files = 0
-    for path in root.rglob("*.jsonl"):
-        files += 1
-        with path.open() as f:
-            for line_no, line in enumerate(f, start=1):
-                finding = _row_finding(line, patterns)
-                if finding:
-                    category, json_path = finding
-                    findings.append(Finding(path, line_no, category, json_path))
-    return ScanReport(findings, files)
+    offset: dict[str, int] = {}
+    for (path, _start, _end), (hits, lines) in zip(tasks, _run(_scan_range, tasks, jobs)):
+        base = offset.get(path, 0)
+        for line_no, category, json_path in hits:
+            findings.append(Finding(Path(path), base + line_no, category, json_path))
+        offset[path] = base + lines
+    return ScanReport(findings, len(files))
 
 
-def clean_tree(root: Path, out: Path) -> dict[str, object]:
+def clean_tree(root: Path, out: Path, jobs: int = 1) -> dict[str, object]:
     """Copy JSONL rows that pass the same rules used by ``scan``."""
     if root.resolve() == out.resolve():
         raise ValueError("clean output must differ from input")
     if out.exists() and any(out.rglob("*.jsonl")):
         raise ValueError("clean output must not contain existing JSONL files")
 
-    patterns = _detection_patterns()
+    out.mkdir(parents=True, exist_ok=True)
+    plan: list[tuple[Path, list[str]]] = []
+    tasks: list[tuple[str, int, int, str]] = []
+    for path in sorted(root.rglob("*.jsonl")):
+        destination = out / path.relative_to(root)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        parts = []
+        for index, (start, end) in enumerate(line_ranges(path)):
+            part = str(destination.with_name(f".{destination.name}.part{index:05d}"))
+            tasks.append((str(path), start, end, part))
+            parts.append(part)
+        plan.append((destination, parts))
+
     kept = 0
-    dropped = 0
     dropped_by_category: Counter[str] = Counter()
     dropped_by_source: Counter[str] = Counter()
+    for (path, *_rest), result in zip(tasks, _run(_clean_range, tasks, jobs)):
+        kept += result["kept"]
+        dropped_by_category.update(result["dropped"])
+        dropped_by_source[Path(path).stem] += sum(result["dropped"].values())
 
-    out.mkdir(parents=True, exist_ok=True)
-    for path in sorted(root.rglob("*.jsonl")):
-        relative = path.relative_to(root)
-        destination = out / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with path.open() as source, destination.open("w") as target:
-            for line in source:
-                finding = _row_finding(line, patterns)
-                if finding:
-                    category, _json_path = finding
-                    dropped += 1
-                    dropped_by_category[category] += 1
-                    dropped_by_source[path.stem] += 1
-                    continue
-                target.write(line)
-                kept += 1
+    for destination, parts in plan:
+        with destination.open("wb") as target:
+            for part in parts:
+                with open(part, "rb") as source:
+                    while chunk := source.read(1 << 24):
+                        target.write(chunk)
+                Path(part).unlink()
 
     return {
         "rows_kept": kept,
-        "rows_dropped": dropped,
+        "rows_dropped": sum(dropped_by_category.values()),
         "dropped_by_category": dict(dropped_by_category),
-        "dropped_by_source": dict(dropped_by_source),
+        "dropped_by_source": {k: v for k, v in dropped_by_source.items() if v},
     }

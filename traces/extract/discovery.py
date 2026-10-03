@@ -11,6 +11,8 @@ from traces.extract.continue_ import ContinueExtractor
 from traces.extract.cursor import CursorExtractor
 from traces.extract.gemini import GeminiExtractor
 from traces.extract.grok_build import GrokBuildExtractor
+from traces.extract.kimi_code import KimiCodeExtractor
+from traces.extract.omp import OmpExtractor
 from traces.extract.opencode import OpenCodeExtractor
 from traces.extract.trae import TraeExtractor
 from traces.extract.windsurf import WindsurfExtractor
@@ -22,6 +24,8 @@ EXTRACTORS: dict[str, type[Extractor]] = {
     "cursor": CursorExtractor,
     "gemini": GeminiExtractor,
     "grok_build": GrokBuildExtractor,
+    "kimi_code": KimiCodeExtractor,
+    "omp": OmpExtractor,
     "opencode": OpenCodeExtractor,
     "trae": TraeExtractor,
     "windsurf": WindsurfExtractor,
@@ -54,14 +58,17 @@ def run_extract(
     raw_dir = out_dir / "raw_extracted"
     counts: dict[str, int] = {}
 
+    raw_dir.mkdir(parents=True, exist_ok=True)
     for name in selected:
         if name not in EXTRACTORS:
             raise ValueError(f"unknown source: {name!r}. available: {available_sources()}")
         extractor = EXTRACTORS[name](root)
-        records: list[Conversation] = []
-        for install in extractor.find_installations():
-            records.extend(extractor.extract(install))
-        _write_jsonl(raw_dir / f"{name}.jsonl", records)
-        counts[name] = len(records)
+        n = 0
+        with (raw_dir / f"{name}.jsonl").open("w") as f:
+            for install in extractor.find_installations():
+                for rec in extractor.extract(install):
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    n += 1
+        counts[name] = n
 
     return counts

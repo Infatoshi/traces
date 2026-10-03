@@ -16,6 +16,63 @@ uv run ruff check . --fix
 Optional: `gitleaks` for `--gitleaks` / `--gitleaks-fix`. Privacy filter:
 `--extra privacy-filter`.
 
+`redact`, `verify`, `clean`, `run`, `scrub-values`, and `publish` split JSONL
+into newline-aligned byte ranges across `--jobs` processes (default: all
+cores); output is identical for any job count. Rule matching goes through a
+Hyperscan prefilter (`traces/fastmatch.py`): one SIMD pass finds which rules can
+match a string, and only those run as Python regexes, so output is identical
+to running every rule. Without the `hyperscan` wheel it falls back to running
+every rule.
+
+## Config and monthly sync
+
+Machine config lives in `traces.local.toml` in the repo root (gitignored; the
+repo is public) or `~/.config/traces/config.toml`; `--config PATH` overrides.
+`traces.example.toml` documents every key. Commands take defaults from it
+(user, private terms, metadata key file, jobs, cache dir, publish repo); CLI
+flags win.
+
+```bash
+uv run traces sync               # stage every host, harvest secrets, extract, redact, merge, scrub, clean
+uv run traces sync --publish     # same, then upload after a clean verify
+uv run traces sync --no-merge    # fresh export only, no merge with the published dataset
+```
+
+`sync` runs from the machine holding the config and does the heavy work on
+`sync.work_host` over one multiplexed SSH connection. Output lands in
+`<work_dir>/run/final` with `MANIFEST.json` (published) and `SUMMARY.json`
+(work host only: per-host extracted vs published counts, cache stats, scrub and
+gitleaks results). Harvested secret values go to a 0700 tmpfs dir on the work
+host and are deleted after the run; staged raw stores are deleted unless
+`sync.keep_stores = true` (then the next rsync is incremental).
+
+What a run checks and records:
+- Published rows are re-redacted only when `config.redaction_rules_version` in
+  the published MANIFEST differs from the current rules; gitleaks scans the
+  fresh export every run and published rows only when not yet scanned under the
+  current rules. Findings inside decoded base64/percent content drop the whole
+  trace (they cannot be replaced in place).
+- `export_summary.tokens` in MANIFEST: o200k_base token totals by model and by
+  source (`traces tokens --in DIR` for any export). The dataset card shows them.
+- Before publishing, read SUMMARY.json: `verify_ok`, `scrub_known_values.left_after_recheck`
+  (must be 0), `gitleaks`, and `hosts`.
+
+Redaction caches each redacted message block under `run.cache_dir`, keyed by
+the block content plus a rules fingerprint (redaction source code, user, home,
+private terms and domains, URL allowlist, placeholder key). Unchanged messages
+are reused across runs; any rule or code change starts a new cache file.
+Placeholders are `[CATEGORY:hmac10]`, an HMAC of the value under the metadata
+key, so they are stable across runs and cannot be reversed by hashing guesses.
+Exports before that used `[CATEGORY:NNNN:sha10]` (plain SHA-256, guessable).
+`sync` rewrites those once in published rows, when the published MANIFEST lacks
+`config.placeholder_format = "hmac10"`, to `[CATEGORY:hmac10]` keyed on the old
+digest (`traces/rekey.py`; standalone `traces rekey-placeholders --in DIR [--check]`).
+
+Building blocks, usable on their own: `traces pull-published`, `traces merge`
+(by trace_id, longest version wins, old-only traces kept), `traces redact
+--export-rows` (re-redact merged export rows, content lists only),
+`traces scrub-values` (exact-value scrub from `traces/harvest.py` output).
+
 ## One-host pipeline
 
 ```bash

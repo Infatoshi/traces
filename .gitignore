@@ -15,3 +15,6 @@ redacted-agent-traces/
 !examples/**/*.jsonl
 .DS_Store
 *.profraw
+
+# machine config (host names, private terms): never commit
+traces.local.toml

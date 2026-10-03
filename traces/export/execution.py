@@ -67,6 +67,11 @@ def _assistant_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "kind": (
                 "tool_call" if messages[message_index].get("tool_calls") else "text"
             ),
+            **(
+                {"tool_schema_hash": messages[message_index]["tool_schema_hash"]}
+                if messages[message_index].get("tool_schema_hash")
+                else {}
+            ),
         }
         for step_index, message_index in enumerate(targets)
     ]
@@ -74,6 +79,19 @@ def _assistant_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _execution_id(metadata: dict[str, Any], task_index: int) -> str:
     return f"{metadata['trace_id']}:task:{task_index}"
+
+
+def _tool_context(conversation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: conversation[key]
+        for key in (
+            "tools",
+            "tool_snapshots",
+            "tool_schema_hash",
+            "tool_schema_quality",
+        )
+        if conversation.get(key)
+    }
 
 
 def export_execution(in_dir: Path, out_file: Path, config: ExportConfig) -> dict:
@@ -104,6 +122,7 @@ def export_execution(in_dir: Path, out_file: Path, config: ExportConfig) -> dict
                     "assistant_steps": steps,
                     "task": {"index": task_index, "count": len(tasks)},
                     "execution": summary,
+                    **_tool_context(conversation),
                     "metadata": metadata,
                 }, ensure_ascii=False) + "\n")
                 rows += 1

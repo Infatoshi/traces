@@ -90,6 +90,24 @@ def _artifacts(message: dict[str, Any]) -> list[Any]:
             artifacts.append(value)
     return artifacts
 
+def _assistant_metadata(
+    message: dict[str, Any], *, include_reasoning: bool
+) -> dict[str, Any]:
+    keys = [
+        "model",
+        "reasoning_effort",
+        "tool_schema_hash",
+        "finish_reason",
+    ]
+    if include_reasoning:
+        keys.append("reasoning")
+    return {
+        key: message[key]
+        for key in keys
+        if message.get(key) not in (None, "")
+    }
+
+
 
 def normalize_execution_messages(
     conversation: dict[str, Any], *, include_reasoning: bool = False
@@ -132,17 +150,22 @@ def normalize_execution_messages(
                 "role": "assistant",
                 "content": "" if results and content else content,
                 "tool_calls": calls,
+                **_assistant_metadata(message, include_reasoning=include_reasoning),
             }
             if artifacts and not results:
                 call_message["artifacts"] = artifacts
             normalized.append(call_message)
         elif role not in {"tool", "assistant"}:
             base: dict[str, Any] = {"role": role, "content": content}
+            for key in ("phase", "origin_kind"):
+                if message.get(key) not in (None, ""):
+                    base[key] = message[key]
             if artifacts:
                 base["artifacts"] = artifacts
             normalized.append(base)
         elif role == "assistant" and not results and content:
             base = {"role": "assistant", "content": content}
+            base.update(_assistant_metadata(message, include_reasoning=include_reasoning))
             if artifacts:
                 base["artifacts"] = artifacts
             normalized.append(base)
@@ -176,7 +199,7 @@ def split_execution_tasks(conversation: dict[str, Any]) -> list[list[dict[str, A
             if current:
                 current.append(message)
             persistent.append(message)
-        elif role == "user":
+        elif role == "user" and message.get("phase") != "injection":
             finish()
             prefix = list(persistent)
             current.append(message)

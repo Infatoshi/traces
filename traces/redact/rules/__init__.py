@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from traces.fastmatch import Prefilter
 from traces.redact.rules import identifiers, paths, secrets, urls
 from traces.redact.rules._types import Rule, RuleContext
 from traces.redact.rules.placeholders import PlaceholderBook
@@ -24,6 +25,7 @@ UPSTREAM_ORDER = [
     "authorization_bearer",
     "bearer_token",
     "env_secret_assignment",
+    "env_secret_colon",
     "env_secret_default",
     "env_secret_colon_default",
     "openai_key",
@@ -131,9 +133,20 @@ def redact_string(
     value: str,
     patterns: list[Rule],
     book: PlaceholderBook,
+    prefilter: Prefilter | None = None,
 ) -> str:
+    """Apply ``patterns`` in order.
+
+    With a ``prefilter`` built from the same patterns, rules that cannot match
+    the current string are skipped. Candidates are recomputed after every
+    substitution, so the output is identical to running every rule.
+    """
     out = value
-    for category, pattern, replacement in patterns:
+    candidates = prefilter.candidates(out) if prefilter is not None else None
+    for index, (category, pattern, replacement) in enumerate(patterns):
+        if candidates is not None and index not in candidates:
+            continue
+
         def repl(m: re.Match[str], _cat: str = category, _rep: str | None = replacement) -> str:
             if _cat == "url" and is_allowed_url(m.group(0), _ALLOWED_DOMAINS_REF[0]):
                 return m.group(0)
@@ -142,16 +155,20 @@ def redact_string(
                 return book.stable(_cat, m.group(0))
             return m.expand(_rep)
 
-        out = pattern.sub(repl, out)
+        new = pattern.sub(repl, out)
+        if prefilter is not None and new != out:
+            candidates = prefilter.candidates(new)
+        out = new
     return out
 
 
 def make_redactor(ctx: RuleContext, book: PlaceholderBook):
     """Return a callable redact_string(value) bound to ctx + book."""
     patterns = build_patterns(ctx)
+    prefilter = Prefilter([pattern for _name, pattern, _rep in patterns])
     _ALLOWED_DOMAINS_REF[0] = ctx.allowed_domains
 
     def _redact(value: str) -> str:
-        return redact_string(value, patterns, book)
+        return redact_string(value, patterns, book, prefilter)
 
     return _redact

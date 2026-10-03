@@ -18,6 +18,9 @@ class RedactorConfig:
     gitleaks: bool = False
     gitleaks_fix: bool = False
     llm_residue_url: str | None = None
+    placeholder_key: str | None = None  # HMAC key for placeholders; default: metadata key
+    cache_dir: str | None = None        # redacted-block cache; None disables caching
+    export_rows: bool = False           # input is export JSONL: redact content lists only
 
 
 @dataclass

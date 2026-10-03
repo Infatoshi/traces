@@ -30,7 +30,13 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development",
 ]
-dependencies = ["click>=8.1"]
+dependencies = [
+  "click>=8.1",
+  "hyperscan>=0.8; sys_platform != 'win32'",
+  "pyahocorasick>=2.0",
+  "tiktoken>=0.7",
+  "tomli>=2.0; python_version < '3.11'",
+]
 
 [project.optional-dependencies]
 privacy-filter = ["transformers>=4.40", "torch>=2.1"]

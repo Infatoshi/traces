@@ -28,6 +28,8 @@ class Message(TypedDict, total=False):
     phase: str
     reasoning: str
     finish_reason: str
+    reasoning_effort: str
+    tool_schema_hash: str
 
 
 class Conversation(TypedDict, total=False):
@@ -54,6 +56,12 @@ class Conversation(TypedDict, total=False):
     tool_call_count: int
     tool_result_count: int
     diff_count: int
+    native_tool_call_count: int
+    native_tool_result_count: int
+    tools: list[dict[str, Any]]
+    tool_snapshots: list[dict[str, Any]]
+    tool_schema_hash: str | None
+    tool_schema_quality: str
 
 
 class Extractor(Protocol):

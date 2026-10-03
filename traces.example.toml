@@ -1,0 +1,48 @@
+# traces machine config. Copy to traces.local.toml in the repo root (gitignored)
+# or ~/.config/traces/config.toml. CLI flags override these values.
+# Never commit the real file: it names hosts and private terms.
+
+[identity]
+user = "your-username"
+# Stable key for trace IDs and placeholder HMACs. Keep it outside the repo.
+metadata_key_file = "~/.config/traces/metadata_key"
+# Extra terms to redact as [PRIVATE_TERM] (names, host names, handles).
+private_terms = ["Your Name", "your-laptop"]
+# private_terms_file = "~/.config/traces/private_terms.txt"   # one per line, read where the command runs
+
+[run]
+jobs = 0                                # 0 = all cores
+cache_dir = "~/.cache/traces"           # redacted-block cache, on the machine that redacts
+
+[publish]
+repo = "your-user/traces"
+private = true
+merge_existing = true                   # sync merges with the published dataset by trace_id
+
+[sync]
+work_host = "workstation"               # ssh alias that does the heavy work; "" = this machine
+work_dir = "/var/tmp/traces-sync"
+uv = "~/.local/bin/uv"                  # uv on the work host
+env_file = "~/.env_vars"                # sourced on the work host (HF_TOKEN for pull/publish)
+sources = []                            # empty = every extractor
+keep_stores = false                     # true: keep staged raw stores (0700) so the next rsync is incremental
+
+# One entry per machine with agent history. ssh = "" means the machine running sync.
+# roots: extra home-like trees on that host (e.g. an archived old home).
+[[hosts]]
+name = "laptop"
+ssh = ""
+home = "/Users/you"
+
+[[hosts]]
+name = "workstation"
+ssh = "workstation"
+home = "/home/you"
+roots = ["/data/old-home"]
+
+[secrets]
+# Literal values harvested on each host and scrubbed from the output.
+all_values = ["~/.env_vars"]            # every value in these files counts
+env_roots = ["~/dev"]                   # .env* files below these roots (secret-named keys)
+# cred_paths = [...]                    # CLI credential files/dirs (defaults in traces/harvest.py)
+gitleaks = ""                           # path to gitleaks on the work host; "" skips it

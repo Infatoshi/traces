@@ -59,6 +59,8 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
         for proj in (project_dir / "projects").iterdir():
             if proj.is_dir():
                 jsonl_files.extend(proj.glob("*.jsonl"))
+                # Current layout nests subagents under <session>/subagents/.
+                jsonl_files.extend(proj.glob("*/subagents/**/agent-*.jsonl"))
     else:
         jsonl_files = list(project_dir.glob("*.jsonl"))
     for jsonl_file in jsonl_files:
@@ -68,7 +70,14 @@ def extract_claude_project_conversations(project_dir: Path) -> list[Conversation
             is_subagent = jsonl_file.name.startswith("agent-")
             parent_session_id: str | None = None
             project_path: str | None = None
-            project_name = jsonl_file.parent.name if jsonl_file.parent.name != "projects" else None
+            project_dir_for_file = next(
+                (p for p in jsonl_file.parents if p.parent.name == "projects"),
+                jsonl_file.parent,
+            )
+            project_name = (
+                project_dir_for_file.name
+                if project_dir_for_file.name != "projects" else None
+            )
             timestamps: list[str] = []
             version: str | None = None
             record_types: set[str] = set()

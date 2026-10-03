@@ -16,6 +16,23 @@ def _conversation() -> dict:
     return {
         "source": "test-agent",
         "session_id": "session-1",
+        "tool_schema_quality": "captured_exact",
+        "tool_snapshots": [{
+            "hash": "tools-1",
+            "quality": "captured_exact",
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "shell",
+                    "description": "Run a command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                },
+            }],
+        }],
         "messages": [
             {"role": "user", "content": "run it"},
             {
@@ -26,6 +43,7 @@ def _conversation() -> dict:
                     "name": "shell",
                     "input": {"command": "pytest -q"},
                 }],
+                "tool_schema_hash": "tools-1",
                 "tool_results": [{
                     "tool_call_id": "call-1",
                     "tool": "shell",
@@ -99,6 +117,9 @@ def test_execution_and_steps_exports_keep_tool_output_out_of_targets(tmp_path):
     first_index = step_row["assistant_steps"][0]["message_index"]
     second_index = step_row["assistant_steps"][1]["message_index"]
     assert execution_row["messages"][first_index]["tool_calls"][0]["name"] == "shell"
+    assert execution_row["tool_schema_quality"] == "captured_exact"
+    assert execution_row["tool_snapshots"][0]["hash"] == "tools-1"
+    assert step_row["assistant_steps"][0]["tool_schema_hash"] == "tools-1"
     assert "passed" not in json.dumps(execution_row["messages"][first_index])
     assert execution_row["messages"][second_index] == {
         "role": "assistant", "content": "done"
@@ -120,6 +141,19 @@ def test_reasoning_phase_is_not_an_assistant_target():
     assert "private reasoning" not in json.dumps(messages)
 
 
+
+def test_assistant_reasoning_respects_include_flag():
+    conversation = _conversation()
+    conversation["messages"][1]["reasoning"] = "inspect first"
+
+    default_messages = normalize_execution_messages(conversation)
+    reasoning_messages = normalize_execution_messages(
+        conversation, include_reasoning=True
+    )
+
+    assert "reasoning" not in default_messages[1]
+    assert reasoning_messages[1]["reasoning"] == "inspect first"
+
 def test_task_windows_reset_at_user_turn_and_keep_system_context():
     conversation = {
         "messages": [
@@ -139,4 +173,30 @@ def test_task_windows_reset_at_user_turn_and_keep_system_context():
     ]
     assert [message["content"] for message in tasks[1]] == [
         "tool contract", "second task", "second answer"
+    ]
+
+
+def test_injected_user_context_does_not_split_task():
+    conversation = {
+        "messages": [
+            {"role": "user", "content": "original task"},
+            {"role": "assistant", "content": "working"},
+            {
+                "role": "user",
+                "content": "background result",
+                "phase": "injection",
+                "origin_kind": "background_task",
+            },
+            {"role": "assistant", "content": "finished"},
+        ]
+    }
+
+    tasks = split_execution_tasks(conversation)
+
+    assert len(tasks) == 1
+    assert [message["content"] for message in tasks[0]] == [
+        "original task",
+        "working",
+        "background result",
+        "finished",
     ]

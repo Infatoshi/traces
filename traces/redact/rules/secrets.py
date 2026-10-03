@@ -36,14 +36,23 @@ def build(ctx: RuleContext) -> list[Rule]:
         (
             "env_secret_assignment",
             re.compile(
-                r"(?i)\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CREDS[_-]?(?:KEY|IV))[A-Z0-9_]*\s*=\s*)(['\"]?)(?:REDACTED|[^\s'\"\\]{8,})\2"
+                r"(?i)\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CREDS[_-]?(?:KEY|IV))[A-Z0-9_]*\s*=\s*)((?:\\+)?['\"]?)(?:REDACTED|[^\s'\"\\]{8,})\2"
+            ),
+            r"\1[SECRET:ENV_VALUE]",
+        ),
+        (
+            # `NAME: value` (probe output, YAML, HTTP headers, form labels).
+            # Needs 16+ chars with a letter and a digit so token counts survive.
+            "env_secret_colon",
+            re.compile(
+                r"(?i)\b([A-Z0-9_-]*(?:API[_\s-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE[_\s-]?KEY|ACCESS[_\s-]?KEY)(?:[_-][A-Z0-9_]*)?(?:\\*['\"])?\s*:\s*)((?:\\+)?['\"]?)(?=[^\s'\"\\]*\d)(?=[^\s'\"\\]*[A-Za-z])[^\s'\"\\\[{$][^\s'\"\\]{15,}\2"
             ),
             r"\1[SECRET:ENV_VALUE]",
         ),
         (
             "env_secret_default",
             re.compile(
-                r"(?i)([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CREDS[_-]?(?:KEY|IV))[A-Z0-9_]*\s*:\s*\$\{[^}:]+:-)([^}\s]{3,})"
+                r"(?i)\b([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CREDS[_-]?(?:KEY|IV))[A-Z0-9_]*\s*:\s*\$\{[^}:]+:-)([^}\s]{3,})"
             ),
             r"\1[SECRET:ENV_DEFAULT]",
         ),

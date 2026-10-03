@@ -228,3 +228,30 @@ def test_find_installations_discovers_dotclaude(tmp_path, monkeypatch):
     ext = ClaudeCodeExtractor()
     installs = ext.find_installations()
     assert tmp_path / ".claude" in installs
+
+
+def test_keeps_nested_subagent_traces(tmp_path):
+    install = tmp_path / ".claude"
+    proj = install / "projects" / "p"
+    events = [
+        {"type": "user", "sessionId": "parent-session",
+         "message": {"content": "delegated task"}},
+        {"type": "assistant", "sessionId": "parent-session",
+         "message": {"model": "claude-model",
+                     "content": [{"type": "text", "text": "done"}]}},
+    ]
+    write_session_jsonl(proj / "parent-session" / "subagents" / "agent-a1.jsonl", events)
+    write_session_jsonl(
+        proj / "parent-session" / "subagents" / "workflows" / "wf_1" / "agent-a2.jsonl",
+        events,
+    )
+    write_session_jsonl(
+        proj / "parent-session" / "subagents" / "workflows" / "wf_1" / "journal.jsonl",
+        events,
+    )
+
+    conversations = list(ClaudeCodeExtractor().extract(install))
+
+    assert sorted(c["session_id"] for c in conversations) == ["agent-a1", "agent-a2"]
+    assert all(c["session_kind"] == "subagent" for c in conversations)
+    assert all(c["parent_session_id"] == "parent-session" for c in conversations)
