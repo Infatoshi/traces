@@ -521,6 +521,8 @@ def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publis
     shutil.copy(run / "MANIFEST.json", final / "MANIFEST.json")
     summary["export_summary"] = manifest["export_summary"]
 
+    # Written before the upload too, so a failed publish still leaves the gate results.
+    (run / "SUMMARY.json").write_text(json.dumps(summary, indent=2))
     if publish:
         if not verification.ok:
             raise SystemExit(f"refusing publish: {len(verification.leftovers)} leftover(s)")
