@@ -52,6 +52,10 @@ What a run checks and records:
   fresh export every run and published rows only when not yet scanned under the
   current rules. Findings inside decoded base64/percent content drop the whole
   trace (they cannot be replaced in place).
+- A trace whose longer new version wins the merge and is then dropped by gitleaks
+  or clean falls back to its published version (re-scrubbed and re-cleaned), so a
+  run never deletes a published trace by improving it. Published rows gitleaks
+  flags in the same run stay out. SUMMARY `fallback`: `lost`, `restored`, `by_source`.
 - `export_summary.tokens` in MANIFEST: o200k_base token totals by model and by
   source (`traces tokens --in DIR` for any export). The dataset card shows them.
 - Before publishing, read SUMMARY.json: `verify_ok`, `scrub_known_values.left_after_recheck`

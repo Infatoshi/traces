@@ -121,6 +121,21 @@ def pull_published(repo_id: str, out: Path, revision: str | None = None) -> dict
     return {"repo": repo_id, "revision": info.sha, "files": files}
 
 
+def keep_traces(tree: Path, ids: set[str], out: Path) -> dict[str, int]:
+    """Copy only the rows of the given traces from every variant in ``tree`` into ``out``."""
+    out.mkdir(parents=True, exist_ok=True)
+    kept: dict[str, int] = {}
+    for path in sorted(tree.glob("*.jsonl")):
+        n = 0
+        with (out / path.name).open("wb") as target:
+            for line, md in iter_rows(path):
+                if md.get("trace_id") in ids:
+                    target.write(line if line.endswith(b"\n") else line + b"\n")
+                    n += 1
+        kept[path.name] = n
+    return kept
+
+
 def drop_traces(tree: Path, ids: set[str]) -> dict[str, int]:
     """Remove every row of the given traces from every variant in ``tree``."""
     removed: dict[str, int] = {}

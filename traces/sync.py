@@ -320,6 +320,47 @@ def _manifest(run: Path, final: Path, stores: list[dict], extract_counts: dict, 
     }
 
 
+def restore_published(published: Path, final: Path, scratch: Path,
+                      values: list[tuple[str, str]], leak_values: list[tuple[str, str]], jobs: int,
+                      exclude: set[str] = frozenset()) -> dict:
+    """Put back the published version of any trace the new run dropped.
+
+    A longer new version wins the merge, but gitleaks or clean can then drop
+    that row, which would delete a trace the dataset already had. The published
+    version passed the same gates when it went out; it is scrubbed and cleaned
+    again here and appended to ``final`` only if it still passes. ``exclude``
+    holds published traces that gitleaks flagged this run (encoded findings
+    cannot be scrubbed in place), which stay out.
+    """
+    from traces.merge import index_messages, iter_rows, keep_traces
+    from traces.scrub import scrub_tree
+    from traces.verify.scanner import clean_tree
+
+    lost = set(index_messages(published)) - set(index_messages(final)) - exclude
+    report: dict[str, Any] = {"lost": len(lost), "restored": 0, "by_source": {}}
+    if not lost:
+        return report
+    picked, cleaned = scratch / "picked", scratch / "clean"
+    keep_traces(published, lost, picked)
+    if values:
+        scrub_tree(picked, values, True, jobs)
+        report["left_after_recheck"] = scrub_tree(picked, values, False, jobs)["occurrences"]
+    if leak_values:
+        scrub_tree(picked, leak_values, True, jobs)
+    report["clean"] = clean_tree(picked, cleaned, jobs=jobs)
+    by_source: Counter[str] = Counter()
+    for part in sorted(cleaned.glob("*.jsonl")):
+        with (final / part.name).open("ab") as target:
+            for line, md in iter_rows(part):
+                target.write(line if line.endswith(b"\n") else line + b"\n")
+                if part.name == "messages.jsonl":
+                    by_source[md.get("source") or "unknown"] += 1
+    report["restored"] = sum(by_source.values())
+    report["by_source"] = dict(sorted(by_source.items()))
+    shutil.rmtree(scratch)
+    return report
+
+
 def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publish: bool,
                merge: bool = True) -> dict:
     from traces.config import RedactorConfig
@@ -352,12 +393,15 @@ def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publis
         gitleaks = None
     leak_values: list[tuple[str, str]] = []
     leak_drop: set[str] = set()
+    published_leaks: set[str] = set()  # published rows gitleaks wants gone; never restored
 
     def gitleaks_pass(tree: Path, tag: str) -> None:
         log(f"gitleaks {tag}")
         found, rules, drop = _gitleaks_values(gitleaks, tree, run, jobs)
         leak_values.extend(found)
         leak_drop.update(drop)
+        if tag == "published":
+            published_leaks.update(drop)
         summary.setdefault("gitleaks", {})[tag] = {
             "findings_by_rule": dict(rules.most_common()), "unique_values": len(found),
             "encoded_traces": len(drop)}
@@ -423,9 +467,10 @@ def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publis
     log("merge")
     rr = run / "merged"
     summary["merge"] = merge_exports(rr, inputs)
-    for d in inputs:
-        shutil.rmtree(d)
+    shutil.rmtree(new)
+    fallback = inputs[1] if len(inputs) > 1 else None  # published rows, kept until after clean
 
+    values: list[tuple[str, str]] = []
     if secrets_dir and any(secrets_dir.glob("*.tsv")):
         log("scrub harvested values")
         values = load_values(sorted(secrets_dir.glob("*.tsv")))
@@ -446,6 +491,13 @@ def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publis
     final = run / "final"
     summary["clean"] = clean_tree(rr, final, jobs=jobs)
     shutil.rmtree(rr)
+    if fallback is not None:
+        log("restore published versions of dropped traces")
+        summary["fallback"] = restore_published(fallback, final, run / "fallback", values, leak_values, jobs,
+                                                exclude=published_leaks)
+        if "scrub_known_values" in summary:
+            summary["scrub_known_values"]["left_after_recheck"] += summary["fallback"].get("left_after_recheck", 0)
+        shutil.rmtree(fallback)
     verification = scan(final, jobs=jobs)
     summary["verify_ok"] = verification.ok
 
@@ -462,6 +514,7 @@ def sync_local(cfg: dict[str, Any], work: Path, secrets_dir: Path | None, publis
         "gitleaks_scanned": bool(gitleaks),
         "merge": {k: v for k, v in summary["merge"].items() if k != "inputs"},
         "clean": summary["clean"],
+        "fallback": {k: v for k, v in (summary.get("fallback") or {}).items() if k != "clean"},
     })
     manifest["export_summary"]["tokens"] = tokens
     (run / "MANIFEST.json").write_text(json.dumps(manifest, indent=2))

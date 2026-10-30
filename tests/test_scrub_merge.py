@@ -80,6 +80,37 @@ def test_drop_traces_removes_all_variants(tmp_path):
     assert '"A"' not in text and '"B"' in text
 
 
+def test_restore_published_puts_back_traces_the_new_run_dropped(tmp_path):
+    """A longer new version won the merge and was then dropped by clean: keep the published one."""
+    from traces.sync import restore_published
+
+    published, final = tmp_path / "published", tmp_path / "final"
+    _export(published, [("A", 2), ("B", 1), ("C", 1)])
+    rows = (published / "messages.jsonl").read_text().splitlines()
+    a = json.loads(rows[0])
+    a["messages"][0]["content"] = f"token {SECRET}"  # a harvested value the scrub must replace
+    c = json.loads(rows[2])
+    c["messages"][0]["content"] = "OPENAI_API_KEY=sk-proj-Zq3vT8mW2xK9pL4nR7sY1bC6"  # still fails clean
+    (published / "messages.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (a, json.loads(rows[1]), c)))
+    _export(final, [("B", 4)])
+
+    report = restore_published(published, final, tmp_path / "scratch", [("h:.env_vars:API_KEY", SECRET)], [], 1)
+
+    assert report["lost"] == 2 and report["restored"] == 1 and report["by_source"] == {"s": 1}
+    assert report["left_after_recheck"] == 0
+    ids = [json.loads(line)["metadata"]["trace_id"] for line in (final / "messages.jsonl").open()]
+    assert sorted(ids) == ["A", "B"]
+    text = (final / "messages.jsonl").read_text()
+    assert SECRET not in text and PLACEHOLDER in text
+    assert '"A:task:0"' in (final / "execution.jsonl").read_text()
+    assert not (tmp_path / "scratch").exists()
+
+    # A published row gitleaks flagged this run is not put back.
+    _export(tmp_path / "final2", [("B", 4)])
+    report = restore_published(published, tmp_path / "final2", tmp_path / "scratch", [], [], 1, exclude={"A"})
+    assert report["lost"] == 1 and report["restored"] == 0
+
+
 def test_token_count_survives_bad_strings():
     import tiktoken
 
