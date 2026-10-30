@@ -5,14 +5,32 @@ Refactored to the Extractor protocol; discovery + parsing logic preserved.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import platform
 from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TextIO
 
 from traces.extract.base import Conversation
+
+
+def _open_rollout(session_file: Path) -> TextIO:
+    """Open a rollout; Codex 0.157+ compresses finished sessions to ``rollout-*.jsonl.zst``."""
+    if session_file.suffix != '.zst':
+        return open(session_file, 'r')
+    try:
+        from compression import zstd  # Python 3.14+
+    except ImportError:
+        import zstandard
+
+        # The returned wrapper owns and closes the file; zstandard.open() would stop after one frame.
+        fh = open(session_file, 'rb')  # noqa: SIM115
+        raw = zstandard.ZstdDecompressor().stream_reader(fh, read_across_frames=True)
+        return io.TextIOWrapper(raw, encoding='utf-8')
+    return zstd.open(session_file, 'rt', encoding='utf-8')
 
 
 def find_codex_installations(home: Path | None = None) -> list[Path]:
@@ -127,7 +145,7 @@ def extract_codex_session(session_file: Path) -> Conversation | None:
             'tool_result': result,
         })
 
-    with open(session_file, 'r') as f:
+    with _open_rollout(session_file) as f:
         for line in f:
             try:
                 obj = json.loads(line)
@@ -315,8 +333,16 @@ def find_all_codex_sessions(installation: Path) -> list[Path]:
     # Check for sessions directory
     sessions_dir = installation / 'sessions'
     if sessions_dir.exists():
-        # Sessions are organized by date: YYYY/MM/DD/rollout-*.jsonl
-        session_files.extend(list(sessions_dir.rglob('rollout-*.jsonl')))
+        # Sessions are organized by date: YYYY/MM/DD/rollout-*.jsonl, or
+        # rollout-*.jsonl.zst once Codex compresses them. A staged store can
+        # hold both forms of one session; read the newer, the .zst on a tie.
+        newest: dict[Path, Path] = {}
+        for path in [*sessions_dir.rglob('rollout-*.jsonl'), *sessions_dir.rglob('rollout-*.jsonl.zst')]:
+            key = path.with_suffix('') if path.suffix == '.zst' else path
+            rank = (path.stat().st_mtime, path.suffix == '.zst')
+            if key not in newest or rank > (newest[key].stat().st_mtime, newest[key].suffix == '.zst'):
+                newest[key] = path
+        session_files.extend(sorted(newest.values()))
 
     # Also check for project-based structure
     projects_dir = installation / 'projects'

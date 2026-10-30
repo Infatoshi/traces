@@ -36,6 +36,7 @@ dependencies = [
   "pyahocorasick>=2.0",
   "tiktoken>=0.7",
   "tomli>=2.0; python_version < '3.11'",
+  "zstandard>=0.23; python_version < '3.14'",  # compressed Codex rollouts; 3.14+ has compression.zstd
 ]
 
 [project.optional-dependencies]

@@ -177,6 +177,62 @@ def test_nested_parent_headers_do_not_replace_rollout_identity(tmp_path):
     assert conv["project_path"] == "/child"
 
 
+def _zstd_compress(data: bytes) -> bytes:
+    try:
+        from compression import zstd  # Python 3.14+
+    except ImportError:
+        import zstandard
+
+        return zstandard.ZstdCompressor().compress(data)
+    return zstd.compress(data)
+
+
+def _rollout_lines(session_id: str, reply: str) -> bytes:
+    events = [
+        {"type": "session_meta", "ordinal": 0, "payload": {"id": session_id}},
+        {"type": "event_msg", "ordinal": 1, "payload": {"type": "user_message", "message": "hello"}},
+        {"type": "event_msg", "ordinal": 2, "payload": {"type": "agent_message", "message": reply}},
+    ]
+    return "".join(json.dumps(ev) + "\n" for ev in events).encode()
+
+
+def test_compressed_rollouts_are_read(tmp_path):
+    install = tmp_path / ".codex"
+    day = install / "sessions" / "2026" / "10" / "29"
+    day.mkdir(parents=True)
+    data = _rollout_lines("zst-1", "hi")
+    # Two concatenated frames: Codex may append to a compressed rollout.
+    half = data.index(b"\n") + 1
+    (day / "rollout-zst-1.jsonl.zst").write_bytes(_zstd_compress(data[:half]) + _zstd_compress(data[half:]))
+
+    convs = list(CodexExtractor().extract(install))
+
+    assert [c["session_id"] for c in convs] == ["zst-1"]
+    assert [m["content"] for m in convs[0]["messages"]] == ["hello", "hi"]
+
+
+def test_session_in_both_forms_is_read_once(tmp_path):
+    import os
+
+    install = tmp_path / ".codex"
+    day = install / "sessions" / "2026" / "10" / "01"
+    day.mkdir(parents=True)
+    plain = day / "rollout-dup.jsonl"
+    packed = day / "rollout-dup.jsonl.zst"
+    plain.write_bytes(_rollout_lines("dup", "old copy"))
+    packed.write_bytes(_zstd_compress(_rollout_lines("dup", "new copy")))
+    os.utime(plain, (1000, 1000))
+    os.utime(packed, (1000, 1000))
+
+    convs = list(CodexExtractor().extract(install))
+    assert len(convs) == 1
+    assert convs[0]["messages"][1]["content"] == "new copy"
+
+    os.utime(plain, (2000, 2000))  # a newer plain file wins
+    convs = list(CodexExtractor().extract(install))
+    assert convs[0]["messages"][1]["content"] == "old copy"
+
+
 def test_extract_empty_install(tmp_path):
     install = tmp_path / ".codex"
     install.mkdir(parents=True)

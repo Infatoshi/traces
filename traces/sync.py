@@ -37,8 +37,8 @@ HARVEST = Path(__file__).resolve().parent / "harvest.py"
 # (path under a home, rsync include globs or None for the whole dir)
 STORE_FILTERS: list[tuple[str, list[str] | None]] = [
     (".claude/projects", ["*.jsonl"]),
-    (".codex/sessions", ["rollout-*.jsonl"]),
-    (".grok/sessions", ["chat_history.jsonl", "summary.json"]),
+    (".codex/sessions", ["rollout-*.jsonl", "rollout-*.jsonl.zst"]),
+    (".grok/sessions", ["chat_history.jsonl", "summary.json", "updates.jsonl", "compaction_checkpoints/*.json"]),
     (".gemini/tmp", ["session-*.json"]),
     (".omp/agent/sessions", ["*.jsonl"]),
     (".kimi-code", None),

@@ -140,9 +140,9 @@ Available filters: `--include-source`, `--drop-sources`, `--project`, `--model`,
 | Key | Typical store | Notes |
 |-----|---------------|--------|
 | `claude_code` | `~/.claude/projects/**` | Main + `agent-*` subagents; structured tool results preserved |
-| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` | Modern function/custom tool calls correlated with outputs |
+| `codex` | `~/.codex/sessions/**/rollout-*.jsonl[.zst]` | Modern function/custom tool calls correlated with outputs; reads compressed rollouts |
 | `cursor` | Cursor GUI SQLite | Multi-format dispatch (v0.2–v2.0+) |
-| `grok_build` | `~/.grok/sessions/**/chat_history.jsonl` | Summary schema: model, effort, session kind, sandbox |
+| `grok_build` | `~/.grok/sessions/**/chat_history.jsonl` + `updates.jsonl` | Summary schema: model, effort, session kind, sandbox; compacted sessions rebuilt in full from the event stream |
 | `gemini` | Gemini CLI cache | Full recorded `toolCalls[].result` payloads |
 | `opencode` | JSON store + `opencode.db` | Ordered parts; shell exit metadata |
 | `continue` | Continue install dirs | |

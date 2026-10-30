@@ -134,9 +134,9 @@ Multi-host extract/combine: [docs/multi-host.md](./docs/multi-host.md).
 | Key | Store |
 |-----|--------|
 | `claude_code` | `~/.claude/projects/**` |
-| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` |
+| `codex` | `~/.codex/sessions/**/rollout-*.jsonl` and `.jsonl.zst` (Codex 0.157+ compresses finished sessions) |
 | `cursor` | Cursor GUI SQLite |
-| `grok_build` | `~/.grok/sessions/**/chat_history.jsonl` (+ `summary.json`) |
+| `grok_build` | `~/.grok/sessions/**/chat_history.jsonl` (+ `summary.json`, `updates.jsonl`, `compaction_checkpoints/`) |
 | `continue` / `gemini` / `opencode` / `trae` / `windsurf` | as implemented |
 
 No live `cursor_cli` extractor (`~/.cursor/chats`).
@@ -144,7 +144,17 @@ No live `cursor_cli` extractor (`~/.cursor/chats`).
 Grok Build: maps `system|user|assistant|reasoning|tool_result`; assistant
 `tool_calls` to `tool_uses`; reasoning summary wrapped in `<reasoning>`. Summary
 schema also normalizes model, created/updated times, chat format version,
-reasoning effort, session kind, and sandbox profile.
+reasoning effort, session kind, and sandbox profile. `chat_history.jsonl` is the
+live context window, so a compacted session keeps only its summary and later
+turns. When the session's `updates.jsonl` (append-only ACP event stream) holds
+strictly more tool results or prompts, the conversation is rebuilt from it: the
+system prompt and session-start context come from chat_history, each compaction
+summary is placed where it happened, rewound turns are dropped, and tool output
+is the model-facing `*_for_prompt` text where Grok recorded one. On the
+2026-10-29 Mac store this recovered 85,593 tool results in 367 of 1,260
+sessions. On uncompacted sessions the rebuilt tool text equals chat_history's,
+or a prefix of it (chat_history appends background-task reminders), for 97% of
+results; most of the rest are task and monitor notices rendered as JSON.
 
 Current-format notes:
 
